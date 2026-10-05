@@ -16,5 +16,7 @@ type Check struct {
 	Key    string
 	Status CheckStatus
 	Detail string
-	Err    error
+	// MessageKey is an actionable hint that the presentation layer translates.
+	MessageKey string
+	Err        error
 }

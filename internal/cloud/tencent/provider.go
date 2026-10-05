@@ -20,8 +20,10 @@ import (
 	"fmt"
 	"time"
 
+	cdn "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdn/v20180606"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 	ssl "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl/v20191205"
+	teo "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/teo/v20220901"
 
 	"github.com/Crequency/orbit/internal/cloud"
 	"github.com/Crequency/orbit/internal/core"
@@ -98,24 +100,54 @@ func (p *Provider) Capabilities() cloud.Capabilities {
 	}
 }
 
-// Preflight validates credentials and permissions for the account.
+// Preflight validates credentials and permissions per product.
 //
-// The service role needed by deployment and association-checked deletion cannot
-// be probed without writing, so it is reported as a warning rather than a pass.
+// A single failing product is reported on its own line: "UnauthorizedOperation"
+// alone does not reveal whether SSL, CDN or EdgeOne refused the call, and a
+// sub-account with a broad policy can still hit a product that is not activated
+// for the account.
 func (p *Provider) Preflight(ctx context.Context, _ string) ([]core.Check, error) {
-	checks := []core.Check{
-		{Key: "cloud.check.credentials", Status: core.CheckOK, Detail: "DescribeCertificates"},
-	}
-	req := ssl.NewDescribeCertificatesRequest()
-	req.Limit = common.Uint64Ptr(1)
+	checks := make([]core.Check, 0, 4)
 
-	if _, err := call(ctx, p.limiter("ssl"), p.opts.MaxAttempts, func() (*ssl.DescribeCertificatesResponse, error) {
-		return p.ssl.DescribeCertificates(req)
-	}); err != nil {
-		_, key, _ := ErrorInfo(err)
-		checks[0] = core.Check{Key: "cloud.check.credentials", Status: core.CheckFail, Err: err, Detail: key}
-		return checks, nil
+	probe := func(key, action string, call func() error) {
+		if err := call(); err != nil {
+			code, hint, _ := ErrorInfo(err)
+			checks = append(checks, core.Check{
+				Key: key, Status: core.CheckFail,
+				Err:        withAction(err, p.account, action),
+				Detail:     code,
+				MessageKey: hint,
+			})
+			return
+		}
+		checks = append(checks, core.Check{Key: key, Status: core.CheckOK, Detail: action})
 	}
+
+	probe("cloud.check.ssl", "ssl:DescribeCertificates", func() error {
+		req := ssl.NewDescribeCertificatesRequest()
+		req.Limit = common.Uint64Ptr(1)
+		_, err := call(ctx, p.limiter("ssl"), p.opts.MaxAttempts, func() (*ssl.DescribeCertificatesResponse, error) {
+			return p.ssl.DescribeCertificates(req)
+		})
+		return err
+	})
+	probe("cloud.check.cdn", "cdn:DescribeDomainsConfig", func() error {
+		req := cdn.NewDescribeDomainsConfigRequest()
+		req.Limit = common.Int64Ptr(1)
+		_, err := call(ctx, p.limiter("cdn"), p.opts.MaxAttempts, func() (*cdn.DescribeDomainsConfigResponse, error) {
+			return p.cdn.DescribeDomainsConfig(req)
+		})
+		return err
+	})
+	probe("cloud.check.teo", "teo:DescribeZones", func() error {
+		req := teo.NewDescribeZonesRequest()
+		req.Limit = common.Int64Ptr(1)
+		_, err := call(ctx, p.limiter("teo"), p.opts.MaxAttempts, func() (*teo.DescribeZonesResponse, error) {
+			return p.teo.DescribeZones(req)
+		})
+		return err
+	})
+
 	checks = append(checks, core.Check{
 		Key:    "cloud.check.service_role",
 		Status: core.CheckWarn,
@@ -124,9 +156,73 @@ func (p *Provider) Preflight(ctx context.Context, _ string) ([]core.Check, error
 	return checks, nil
 }
 
+// Scan implements cloud.Provider: one pass over certificates, both products and
+// the association evidence. Product-level failures become warnings so that a
+// single unavailable product cannot break the whole inventory.
+func (p *Provider) Scan(ctx context.Context, _ string, scope cloud.ScanScope) (cloud.ScanResult, error) {
+	var res cloud.ScanResult
+
+	// The certificate pool is mandatory: without it nothing can be matched.
+	certs, err := p.fetchCertificates(ctx)
+	if err != nil {
+		return res, withAction(err, p.account, "ssl:DescribeCertificates")
+	}
+	res.Certificates = certs
+
+	want := map[string]bool{}
+	for _, name := range scope.Products {
+		want[name] = true
+	}
+	all := len(want) == 0
+
+	if all || want["cdn"] {
+		items, err := p.listCDNDomains(ctx)
+		if err != nil {
+			res.Warnings = append(res.Warnings, p.warning("cdn", "cdn:DescribeDomainsConfig", err))
+		} else {
+			res.Resources = append(res.Resources, items...)
+		}
+	}
+	if all || want["teo"] {
+		items, err := p.listTEODomains(ctx)
+		if err != nil {
+			res.Warnings = append(res.Warnings, p.warning("teo", "teo:DescribeZones + teo:DescribeAccelerationDomains", err))
+		} else {
+			res.Resources = append(res.Resources, items...)
+		}
+	}
+
+	ids := make([]string, 0, len(certs))
+	for _, c := range certs {
+		ids = append(ids, c.ID)
+	}
+	evidence, err := p.fetchBindings(ctx, ids, false)
+	if err != nil {
+		res.Warnings = append(res.Warnings, p.warning("ssl", "ssl:CreateCertificateBindResourceSyncTask + DescribeCertificateBindResourceTaskResult", err))
+	} else {
+		res.Evidence = evidence
+	}
+	return res, nil
+}
+
+func (p *Provider) warning(product, action string, err error) cloud.ScanWarning {
+	code, key, _ := ErrorInfo(err)
+	return cloud.ScanWarning{
+		Product:    product,
+		Action:     action,
+		Code:       code,
+		MessageKey: key,
+		Err:        withAction(err, p.account, action),
+	}
+}
+
 // ListCertificates implements cloud.Provider.
 func (p *Provider) ListCertificates(ctx context.Context, _ string, _ cloud.ScanScope) ([]core.Certificate, error) {
-	return p.fetchCertificates(ctx)
+	certs, err := p.fetchCertificates(ctx)
+	if err != nil {
+		return nil, withAction(err, p.account, "ssl:DescribeCertificates")
+	}
+	return certs, nil
 }
 
 // ListResources implements cloud.Provider. Both products are enumerated unless
@@ -162,7 +258,11 @@ func (p *Provider) ListBindings(ctx context.Context, _ string, certIDs []string)
 	if len(certIDs) == 0 {
 		return map[string]core.BindingEvidence{}, nil
 	}
-	return p.fetchBindings(ctx, certIDs, false)
+	ev, err := p.fetchBindings(ctx, certIDs, false)
+	if err != nil {
+		return nil, withAction(err, p.account, "ssl:CreateCertificateBindResourceSyncTask")
+	}
+	return ev, nil
 }
 
 // Apply implements cloud.Provider.

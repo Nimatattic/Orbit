@@ -68,11 +68,16 @@ func CleanPlan(w io.Writer, b *i18n.Bundle, plan core.CleanPlan) {
 	}
 }
 
-// Checks renders preflight/doctor results.
 func Checks(w io.Writer, b *i18n.Bundle, checks []core.Check) {
 	tw := tabwriter.NewWriter(w, 2, 4, 2, ' ', 0)
 	for _, c := range checks {
 		detail := c.Detail
+		if c.MessageKey != "" {
+			if detail != "" {
+				detail += " "
+			}
+			detail += b.T(c.MessageKey)
+		}
 		if detail == "" && c.Err != nil {
 			detail = c.Err.Error()
 		}

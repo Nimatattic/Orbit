@@ -68,6 +68,29 @@ type Capabilities struct {
 	ExtraScopes         []string
 }
 
+// ScanResult is a full snapshot of one account.
+type ScanResult struct {
+	Certificates []core.Certificate
+	Resources    []core.Resource
+	Evidence     map[string]core.BindingEvidence
+	Warnings     []ScanWarning
+}
+
+// Complete reports whether every product could be scanned.
+func (r ScanResult) Complete() bool { return len(r.Warnings) == 0 }
+
+// ScanWarning records a per-product failure that did not abort the whole scan.
+//
+// Warnings are what make a partial scan visible: `clean` must refuse to act on
+// an incomplete evidence set, while `status` may still report everything else.
+type ScanWarning struct {
+	Product    string // ssl / cdn / teo
+	Action     string // e.g. cdn:DescribeDomainsConfig
+	Code       string // cloud error code, empty for network errors
+	MessageKey string // actionable hint
+	Err        error
+}
+
 // Provider is the single seam between the engine and a cloud vendor.
 type Provider interface {
 	// Name is the platform identifier, e.g. "tencent".
@@ -76,6 +99,10 @@ type Provider interface {
 	Capabilities() Capabilities
 	// Preflight verifies credentials, roles and permissions for one account.
 	Preflight(ctx context.Context, account string) ([]core.Check, error)
+	// Scan collects certificates, resources and association evidence in one go.
+	// A product that cannot be scanned is reported as a warning instead of
+	// failing the whole call, unless the certificate pool itself is unavailable.
+	Scan(ctx context.Context, account string, scope ScanScope) (ScanResult, error)
 	// ListCertificates returns the certificate pool of one account.
 	ListCertificates(ctx context.Context, account string, scope ScanScope) ([]core.Certificate, error)
 	// ListResources returns domains that can hold a certificate.

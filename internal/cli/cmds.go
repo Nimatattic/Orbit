@@ -348,7 +348,7 @@ func (a *App) newAccountRemoveCmd() *cobra.Command {
 }
 
 func (a *App) newAccountTestCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "test",
 		Short: "account.test.short",
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -380,6 +380,9 @@ func (a *App) newAccountTestCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&a.Accounts, "accounts", "", "")
+	cmd.Flags().BoolVar(&a.AllAccounts, "all-accounts", false, "")
+	return cmd
 }
 
 func (a *App) newDoctorCmd() *cobra.Command {

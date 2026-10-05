@@ -165,6 +165,56 @@ M1 里最容易出错的一点：EdgeOne 域名的证书配置由 `Certificate.M
 | V4 | EdgeOne 免费证书是否也出现在 SSL 证书列表里 | 对比第 4 步的 `certificates.total` 与控制台 SSL 列表数量 |
 | V5 | `ModifyDomainConfig` 的 Route 更新是否真的生效 | 第 8 步 CDN 分支执行后，控制台该域名的证书是否已切换 |
 
+
+## 排错：`UnauthorizedOperation`（操作无权限）
+
+即使子账号是 Administrator，也可能遇到：
+
+```
+This account has no permission for this product, or the product is not activated...
+  [TencentCloudSDKError] Code=UnauthorizedOperation, Message=操作无权限。
+```
+
+**先定位是哪个产品**（Orbit 会分别探测 SSL / CDN / EdgeOne）：
+
+```bash
+./bin/orbit account test --accounts=main
+```
+
+输出形如：
+
+```
+别名 main
+  [通过]  SSL 证书服务（ssl:DescribeCertificates）   ssl:DescribeCertificates
+  [失败]  CDN（cdn:DescribeDomainsConfig）      UnauthorizedOperation 该账号在此产品上无权限，或该产品尚未开通…
+  [通过]  EdgeOne（teo:DescribeZones）          teo:DescribeZones
+  [警告]  服务角色授权                            ...first write
+```
+
+拿到失败的产品后，按下面顺序排查：
+
+1. **该产品是否已开通**：`AdministratorAccess` 只授予"访问已开通服务"的权限，**不代替开通服务**。CDN 与 EdgeOne 都需要在控制台分别开通（EdgeOne 还需绑定套餐）。
+2. **子账号是否为"协作者 + AdministratorAccess"**：个别较新的产品不在预设策略的覆盖范围内，需要额外附加该产品的预设策略（如 CDN / EdgeOne 各自的 FullAccess）。
+3. **该账号下确实没有该产品的资源**：部分接口在没有开通/没有资源时会返回 `UnauthorizedOperation` 而不是空列表。
+4. **确认调用的是哪个 appid**：多账号场景下 `--accounts=` 决定了用哪套密钥，`account test` 的输出会带上账号别名。
+
+**临时绕过**：如果你暂时不使用某个产品，直接把它从范围里去掉即可（不会产生噪声，也不会影响清理安全性）：
+
+```bash
+./bin/orbit status --accounts=main --products=cdn        # 只扫 CDN
+./bin/orbit status --accounts=main --products=teo        # 只扫 EdgeOne
+# 或在 ~/.orbit/config.yaml 里固定：defaults.products: [cdn]
+```
+
+**Orbit 在部分扫描失败时的行为**（v1.1 起）：
+
+| 命令 | 行为 |
+| --- | --- |
+| `status` / `update --dry-run` | **不整体失败**：把失败的产品打印为 `scan warning`（含 API 名与错误码），继续用读到的数据出结果 |
+| `update --yes` | 只对成功扫描到的产品执行写入；未扫到的产品不会被触碰 |
+| `clean` | **拒绝执行**（退出码 4），因为清理证据不完整；确认风险后可加 `--permit-partial-scan` 强制继续 |
+| 证书池本身取不到 | 直接失败——没有证书池无法做任何匹配 |
+
 ## M1 已知边界（不是 bug）
 
 - **TUI 未实现**：`orbit status` 目前是文本/JSON 输出，多 Tab TUI 在 M5。
@@ -178,7 +228,7 @@ M1 里最容易出错的一点：EdgeOne 域名的证书配置由 `Certificate.M
 | 现象 | 含义 / 处理 |
 | --- | --- |
 | 退出码 1 + `cloud.err.auth_failed` | SecretId/SecretKey 无效；`orbit account add --alias main --force` 重录 |
-| 退出码 1 + `cloud.err.no_permission` | 子账号缺权限；对照第 0 节的策略补齐 |
+| 退出码 1/2 + `cloud.err.no_permission` | 先跑 `orbit account test --accounts=<别名>` 定位是哪个产品，再按上面的「排错：UnauthorizedOperation」处理 |
 | 退出码 4 + 账号歧义 | 多个账号时需 `--accounts=main` 或 `--all-accounts` |
 | 退出码 2 + `cloud.err.role_missing` | 服务角色未授权；去控制台授权后重试（删除类操作会因此被保留，这是设计行为） |
 | 退出码 2 + `cloud.err.delete_kept_bound` | 该证书仍被资源引用，Orbit 主动保留 |

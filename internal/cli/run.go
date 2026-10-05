@@ -77,11 +77,14 @@ func (a *App) newCleanCmd() *cobra.Command {
 	return cmd
 }
 
-// planInputs gathers everything a plan needs for one account.
+// planInputs gathers everything a plan needs for one account. Warnings record
+// products that could not be scanned: the plan is still usable, but cleanup is
+// not, because its evidence would be incomplete.
 type planInputs struct {
 	certs     []core.Certificate
 	resources []core.Resource
 	evidence  map[string]core.BindingEvidence
+	warnings  []cloud.ScanWarning
 }
 
 func (a *App) collect(ctx context.Context, provider cloud.Provider, account string) (*planInputs, error) {
@@ -89,24 +92,55 @@ func (a *App) collect(ctx context.Context, provider cloud.Provider, account stri
 	if err != nil {
 		return nil, err
 	}
-	scope := cloud.ScanScope{Products: products, Domains: splitList(a.Domains)}
-	certs, err := provider.ListCertificates(ctx, account, scope)
+	scan, err := provider.Scan(ctx, account, cloud.ScanScope{
+		Products: products,
+		Domains:  splitList(a.Domains),
+	})
 	if err != nil {
 		return nil, a.mapProviderErr(err, provider.Name())
 	}
-	resources, err := provider.ListResources(ctx, account, scope)
-	if err != nil {
-		return nil, a.mapProviderErr(err, provider.Name())
+	return &planInputs{
+		certs:     scan.Certificates,
+		resources: scan.Resources,
+		evidence:  scan.Evidence,
+		warnings:  scan.Warnings,
+	}, nil
+}
+
+// warningDTO is the JSON shape of a scan warning (errors do not marshal well).
+type warningDTO struct {
+	Product string `json:"product"`
+	Action  string `json:"action"`
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+func (a *App) warningDTOs(warnings []cloud.ScanWarning) []warningDTO {
+	out := make([]warningDTO, 0, len(warnings))
+	for _, w := range warnings {
+		dto := warningDTO{Product: w.Product, Action: w.Action, Code: w.Code}
+		if w.MessageKey != "" {
+			dto.Message = a.Bundle.T(w.MessageKey)
+		}
+		out = append(out, dto)
 	}
-	ids := make([]string, 0, len(certs))
-	for _, c := range certs {
-		ids = append(ids, c.ID)
+	return out
+}
+
+// renderWarnings prints partial-scan warnings to stderr so that machine-readable
+// stdout stays clean.
+func (a *App) renderWarnings(warnings []cloud.ScanWarning) {
+	for _, w := range warnings {
+		hint := ""
+		if w.MessageKey != "" {
+			hint = a.Bundle.T(w.MessageKey)
+		}
+		fmt.Fprintln(a.Err, a.Bundle.T("scan.warning",
+			"product", w.Product, "action", w.Action, "code", w.Code, "hint", hint))
+		if w.Err != nil {
+			fmt.Fprintf(a.Err, "    %v\n", w.Err)
+		}
 	}
-	evidence, err := provider.ListBindings(ctx, account, ids)
-	if err != nil {
-		return nil, a.mapProviderErr(err, provider.Name())
-	}
-	return &planInputs{certs: certs, resources: resources, evidence: evidence}, nil
 }
 
 func (a *App) updateOptions(account string) (core.PlanOptions, error) {
@@ -152,6 +186,7 @@ func (a *App) runUpdate(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		a.renderWarnings(inputs.warnings)
 		opts, err := a.updateOptions(account)
 		if err != nil {
 			return err
@@ -229,6 +264,12 @@ func (a *App) runClean(ctx context.Context) error {
 		inputs, err := a.collect(ctx, provider, account)
 		if err != nil {
 			return err
+		}
+		a.renderWarnings(inputs.warnings)
+		if len(inputs.warnings) > 0 && requireEvidence && !a.PartialScan {
+			// Gate G2: cleanup on a partial scan could delete a certificate that
+			// a product we failed to read is still using.
+			return exitcode.New(exitcode.GateRefused, "scan.refused")
 		}
 		plan := core.CleanCandidates(inputs.certs, inputs.evidence, inputs.resources, core.CleanOptions{
 			Account:             account,
@@ -334,15 +375,16 @@ func (a *App) runStatus(ctx context.Context) error {
 		return err
 	}
 	type summary struct {
-		Account        string `json:"account"`
-		Certificates   int    `json:"certificates"`
-		Uploaded       int    `json:"uploaded"`
-		InUse          int    `json:"in_use"`
-		UnusedUploaded int    `json:"unused_uploaded"`
-		Resources      int    `json:"resources"`
-		Unbound        int    `json:"unbound"`
-		PendingApply   int    `json:"pending_apply"`
-		ForeignCerts   int    `json:"foreign_certs"`
+		Account        string       `json:"account"`
+		Certificates   int          `json:"certificates"`
+		Uploaded       int          `json:"uploaded"`
+		InUse          int          `json:"in_use"`
+		UnusedUploaded int          `json:"unused_uploaded"`
+		Resources      int          `json:"resources"`
+		Unbound        int          `json:"unbound"`
+		PendingApply   int          `json:"pending_apply"`
+		ForeignCerts   int          `json:"foreign_certs"`
+		Warnings       []warningDTO `json:"warnings,omitempty"`
 	}
 	var out []summary
 
@@ -355,13 +397,20 @@ func (a *App) runStatus(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		a.renderWarnings(inputs.warnings)
 		opts, err := a.updateOptions(account)
 		if err != nil {
 			return err
 		}
 		plan := core.BuildUpdatePlan(inputs.resources, inputs.certs, opts)
 
-		s := summary{Account: account, Certificates: len(inputs.certs), Resources: len(inputs.resources), PendingApply: plan.Count(core.KindApply)}
+		s := summary{
+			Account:      account,
+			Certificates: len(inputs.certs),
+			Resources:    len(inputs.resources),
+			PendingApply: plan.Count(core.KindApply),
+			Warnings:     a.warningDTOs(inputs.warnings),
+		}
 		for _, c := range inputs.certs {
 			if c.IsUploaded() {
 				s.Uploaded++
@@ -446,6 +495,27 @@ func (a *App) doctorChecks() []core.Check {
 			detail = fmt.Sprintf("%s, account %s", detail, accounts[0].Alias)
 		}
 		checks = append(checks, core.Check{Key: "doctor.check.provider", Status: core.CheckOK, Detail: detail})
+	}
+
+	// Per-product probes: this is what tells "UnauthorizedOperation" apart from
+	// "the product is not activated for this account".
+	probeAccounts := a.Loaded.Config.Accounts(DefaultPlatform)
+	if len(probeAccounts) == 0 && a.Demo {
+		probeAccounts = []config.Account{{Alias: DemoAccount}}
+	}
+	for _, acc := range probeAccounts {
+		provider, err := a.providerFor(acc.Alias)
+		if err != nil {
+			continue
+		}
+		probes, err := provider.Preflight(context.Background(), acc.Alias)
+		if err != nil {
+			continue
+		}
+		for _, p := range probes {
+			p.Detail = acc.Alias + ": " + p.Detail
+			checks = append(checks, p)
+		}
 	}
 	return checks
 }

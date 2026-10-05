@@ -128,6 +128,27 @@ func (p *Provider) Preflight(_ context.Context, _ string) ([]core.Check, error) 
 	}, nil
 }
 
+// Scan implements cloud.Provider by delegating to the in-memory lists.
+func (p *Provider) Scan(ctx context.Context, account string, scope cloud.ScanScope) (cloud.ScanResult, error) {
+	certs, err := p.ListCertificates(ctx, account, scope)
+	if err != nil {
+		return cloud.ScanResult{}, err
+	}
+	resources, err := p.ListResources(ctx, account, scope)
+	if err != nil {
+		return cloud.ScanResult{}, err
+	}
+	ids := make([]string, 0, len(certs))
+	for _, c := range certs {
+		ids = append(ids, c.ID)
+	}
+	evidence, err := p.ListBindings(ctx, account, ids)
+	if err != nil {
+		return cloud.ScanResult{}, err
+	}
+	return cloud.ScanResult{Certificates: certs, Resources: resources, Evidence: evidence}, nil
+}
+
 // ListCertificates implements cloud.Provider.
 func (p *Provider) ListCertificates(_ context.Context, _ string, _ cloud.ScanScope) ([]core.Certificate, error) {
 	return append([]core.Certificate(nil), p.certs...), nil

@@ -5,6 +5,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -58,12 +59,18 @@ type App struct {
 	BackupDir   string
 	ExpWrite    bool
 
-	Loaded      *config.Loaded
-	Bundle      *i18n.Bundle
-	Creds       *credential.Credentials
-	Out         io.Writer
-	Err         io.Writer
-	In          io.Reader
+	Loaded *config.Loaded
+	Bundle *i18n.Bundle
+	Creds  *credential.Credentials
+	Out    io.Writer
+	Err    io.Writer
+	In     io.Reader
+	// providerFactory is a test seam; production code builds providers from
+	// configuration and credentials.
+	providerFactory func(alias string) (cloud.Provider, error)
+	// testOut/testErr keep the concrete buffers in tests only.
+	testOut     *bytes.Buffer
+	testErr     *bytes.Buffer
 	WorkDir     string
 	Home        string
 	Interactive bool
@@ -159,6 +166,9 @@ func (a *App) credentialStore() *credential.Store {
 
 // providerFor builds the cloud provider for one account.
 func (a *App) providerFor(alias string) (cloud.Provider, error) {
+	if a.providerFactory != nil {
+		return a.providerFactory(alias)
+	}
 	if a.Demo {
 		return fake.NewDemo(), nil
 	}

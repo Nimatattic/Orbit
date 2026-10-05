@@ -232,9 +232,13 @@ type fakeTEO struct {
 	zones      []*teo.Zone
 	domains    map[string][]*teo.AccelerationDomain
 	modifyReqs []*teo.ModifyHostsCertificateRequest
+	failZones  error
 }
 
 func (f *fakeTEO) DescribeZones(*teo.DescribeZonesRequest) (*teo.DescribeZonesResponse, error) {
+	if f.failZones != nil {
+		return nil, f.failZones
+	}
 	return &teo.DescribeZonesResponse{Response: &teo.DescribeZonesResponseParams{
 		TotalCount: common.Int64Ptr(int64(len(f.zones))),
 		Zones:      f.zones,
@@ -758,5 +762,82 @@ func TestAbortOnAuthorisationFailures(t *testing.T) {
 	}
 	if abortOn(tcerr.NewTencentCloudSDKError("ResourceUnavailable.CdnHostNoIcp", "x", "r")) {
 		t.Fatal("a per-domain failure must not abort the whole run")
+	}
+}
+
+// ---------------------------------------------------------------------- scan
+
+func TestScanDegradesWhenOneProductIsUnavailable(t *testing.T) {
+	sslFake := &fakeSSL{
+		certs: []*ssl.Certificates{sslCert("c-1", "a", "www.example.com", nil, "upload", "", "2027-01-01 00:00:00", ptr(-1))},
+	}
+	cdnFake := &fakeCDN{domains: []*cdn.DetailDomain{{
+		Domain: common.StringPtr("www.example.com"),
+		Status: common.StringPtr("online"),
+		Https:  &cdn.Https{CertInfo: &cdn.ServerCert{CertId: common.StringPtr("c-1")}, SslStatus: common.StringPtr("deployed")},
+	}}}
+	teoFake := &fakeTEO{failZones: tcerr.NewTencentCloudSDKError("UnauthorizedOperation", "操作无权限。", "req-9")}
+	p := testProvider(t, sslFake, cdnFake, teoFake)
+
+	res, err := p.Scan(context.Background(), "demo", cloud.ScanScope{})
+	if err != nil {
+		t.Fatalf("a single unavailable product must not fail the scan: %v", err)
+	}
+	if len(res.Certificates) != 1 {
+		t.Fatalf("certificates should still be collected, got %d", len(res.Certificates))
+	}
+	if len(res.Resources) != 1 {
+		t.Fatalf("the healthy product should still be collected, got %d", len(res.Resources))
+	}
+	if res.Complete() {
+		t.Fatal("warnings must make the scan incomplete")
+	}
+	if len(res.Warnings) != 1 {
+		t.Fatalf("expected one warning, got %+v", res.Warnings)
+	}
+	w := res.Warnings[0]
+	if w.Product != "teo" || w.Code != "UnauthorizedOperation" {
+		t.Fatalf("the warning must name the product and code: %+v", w)
+	}
+	if !strings.Contains(w.Action, "teo:DescribeZones") {
+		t.Fatalf("the warning must name the failing action, got %q", w.Action)
+	}
+	if !strings.Contains(w.Err.Error(), "account demo") {
+		t.Fatalf("the warning must name the account, got %q", w.Err.Error())
+	}
+}
+
+func TestScanFailsWhenCertificatePoolIsUnavailable(t *testing.T) {
+	auth := tcerr.NewTencentCloudSDKError("UnauthorizedOperation", "操作无权限。", "req-10")
+	sslFake := &fakeSSL{failOnce: map[string]error{"DescribeCertificates": auth}}
+	p := testProvider(t, sslFake, &fakeCDN{}, &fakeTEO{})
+
+	if _, err := p.Scan(context.Background(), "demo", cloud.ScanScope{}); err == nil {
+		t.Fatal("without the certificate pool nothing can be matched, so this must fail")
+	} else if got := ActionOf(err); got != "ssl:DescribeCertificates" {
+		t.Fatalf("action = %q, want ssl:DescribeCertificates", got)
+	}
+}
+
+func TestPreflightReportsEachProductSeparately(t *testing.T) {
+	teoFake := &fakeTEO{failZones: tcerr.NewTencentCloudSDKError("UnauthorizedOperation", "操作无权限。", "req-11")}
+	p := testProvider(t, &fakeSSL{}, &fakeCDN{}, teoFake)
+
+	checks, err := p.Preflight(context.Background(), "main")
+	if err != nil {
+		t.Fatalf("preflight: %v", err)
+	}
+	status := map[string]core.CheckStatus{}
+	for _, c := range checks {
+		status[c.Key] = c.Status
+	}
+	if status["cloud.check.ssl"] != core.CheckOK || status["cloud.check.cdn"] != core.CheckOK {
+		t.Fatalf("healthy products must pass: %+v", status)
+	}
+	if status["cloud.check.teo"] != core.CheckFail {
+		t.Fatalf("the unavailable product must fail on its own line: %+v", status)
+	}
+	if status["cloud.check.service_role"] != core.CheckWarn {
+		t.Fatalf("the service role cannot be probed read-only: %+v", status)
 	}
 }

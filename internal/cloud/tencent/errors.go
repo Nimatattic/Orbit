@@ -3,6 +3,7 @@ package tencent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand"
 	"sync"
 	"time"
@@ -265,4 +266,40 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 	case <-timer.C:
 		return nil
 	}
+}
+
+// actionError annotates which API call failed, for which account. Without it a
+// cloud failure is untraceable: "UnauthorizedOperation" alone does not say
+// whether SSL, CDN or EdgeOne refused the call.
+type actionError struct {
+	action  string
+	account string
+	err     error
+}
+
+func (e *actionError) Error() string {
+	if e.account == "" {
+		return fmt.Sprintf("%s (action %s)", e.err, e.action)
+	}
+	return fmt.Sprintf("%s (action %s, account %s)", e.err, e.action, e.account)
+}
+
+func (e *actionError) Unwrap() error      { return e.err }
+func (e *actionError) MessageKey() string { return messageKeyOf(e.err) }
+
+// withAction wraps err with the failing API action and account.
+func withAction(err error, account, action string) error {
+	if err == nil {
+		return nil
+	}
+	return &actionError{action: action, account: account, err: err}
+}
+
+// ActionOf returns the API action that failed, or "" when unknown.
+func ActionOf(err error) string {
+	var ae *actionError
+	if errors.As(err, &ae) {
+		return ae.action
+	}
+	return ""
 }
