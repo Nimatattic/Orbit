@@ -96,6 +96,11 @@ type Resource struct {
 	// BoundNotAfter is the expiry reported by the product side, used only for
 	// cross-checking against the SSL pool (decision T10).
 	BoundNotAfter time.Time
+	// CertState is the product side certificate state, kept apart from the
+	// resource status because the two use different enums (decision T8): CDN
+	// Https.SslStatus (closed/deploying/deployed/failed) or EdgeOne
+	// CertificateInfo.Status (deployed/processing/applying/failed/issued).
+	CertState string
 
 	// InstanceKey is the product specific identifier used by
 	// DeployCertificateInstance, pre-rendered during enumeration.
@@ -186,10 +191,13 @@ type Change struct {
 	Domain       string
 	Kind         ChangeKind
 	Strategy     Strategy
-	From         *CertRef
-	To           *CertRef
-	Risk         Risk
-	Reasons      []string
+	// InstanceKey is the product-specific identifier the unified deploy path
+	// (DeployCertificateInstance) needs; empty when the product cannot supply it.
+	InstanceKey string
+	From        *CertRef
+	To          *CertRef
+	Risk        Risk
+	Reasons     []string
 }
 
 // NeedsWrite reports whether the change mutates cloud state.

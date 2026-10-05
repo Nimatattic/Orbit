@@ -174,7 +174,12 @@ func (a *App) providerFor(alias string) (cloud.Provider, error) {
 	if err != nil {
 		return nil, exitcode.Wrap(err, exitcode.Fatal, "err.account_not_found", "alias", alias)
 	}
-	return tencent.New(alias, tencent.Options{SecretID: secret.SecretID, SecretKey: secret.SecretKey}), nil
+	provider, err := tencent.New(alias, tencent.Options{SecretID: secret.SecretID, SecretKey: secret.SecretKey})
+	if err != nil {
+		return nil, exitcode.Wrap(err, exitcode.Fatal, "err.provider_unimplemented",
+			"platform", DefaultPlatform)
+	}
+	return provider, nil
 }
 
 // accountTargets decides which accounts a command runs against. Ambiguity is
@@ -242,13 +247,20 @@ func (a *App) accountConfig(alias string) (config.Account, bool) {
 	return config.Account{}, false
 }
 
-// mapProviderErr turns provider sentinels into actionable CLI errors.
+// mapProviderErr turns provider sentinels into actionable CLI errors: a cloud
+// failure keeps its raw text but is prefixed with a translated hint.
 func (a *App) mapProviderErr(err error, platform string) error {
 	if err == nil {
 		return nil
 	}
 	if errors.Is(err, cloud.ErrNotImplemented) {
 		return exitcode.Wrap(err, exitcode.Fatal, "err.provider_unimplemented", "platform", platform)
+	}
+	var keyed interface{ MessageKey() string }
+	if errors.As(err, &keyed) {
+		if key := keyed.MessageKey(); key != "" {
+			return exitcode.Wrap(err, exitcode.Fatal, key)
+		}
 	}
 	return err
 }

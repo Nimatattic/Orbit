@@ -94,6 +94,7 @@ func BuildUpdatePlan(resources []Resource, certs []Certificate, opts PlanOptions
 			ResourceID:   res.ID,
 			ResourceName: res.Name,
 			Domain:       domain,
+			InstanceKey:  res.InstanceKey,
 			From:         boundRef(res),
 		}
 

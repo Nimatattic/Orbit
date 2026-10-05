@@ -439,9 +439,13 @@ func (a *App) doctorChecks() []core.Check {
 	checks = append(checks, core.Check{Key: "doctor.check.locales", Status: core.CheckOK, Detail: strings.Join(i18n.Supported(), ", ")})
 
 	if a.Demo {
-		checks = append(checks, core.Check{Key: "doctor.check.provider", Status: core.CheckWarn, Detail: "demo data"})
+		checks = append(checks, core.Check{Key: "doctor.check.provider", Status: core.CheckWarn, Detail: "demo data (no Tencent Cloud access)"})
 	} else {
-		checks = append(checks, core.Check{Key: "doctor.check.provider", Status: core.CheckFail, Detail: "tencent provider arrives in M1"})
+		detail := "tencent SDK wired: ssl + cdn + teo"
+		if accounts := a.Loaded.Config.Accounts(DefaultPlatform); len(accounts) > 0 {
+			detail = fmt.Sprintf("%s, account %s", detail, accounts[0].Alias)
+		}
+		checks = append(checks, core.Check{Key: "doctor.check.provider", Status: core.CheckOK, Detail: detail})
 	}
 	return checks
 }

@@ -1,7 +1,6 @@
 {
   "app.name": "Orbit",
   "app.tagline": "多云证书编排与巡检工具",
-
   "root.short": "Orbit — 云服务证书编排与巡检",
   "status.short": "只读巡检：展示证书、资源与待办",
   "update.short": "匹配并应用 SSL 证书",
@@ -10,7 +9,6 @@
   "config.short": "查看与修改配置",
   "doctor.short": "环境自检：配置、凭证、权限、语言包",
   "version.short": "打印版本信息",
-
   "flag.lang": "输出语言（zh-CN / en-US）",
   "flag.config": "指定配置文件路径",
   "flag.local": "使用项目级配置 ./.orbit.yaml",
@@ -32,7 +30,6 @@
   "flag.experimental_write": "允许尚未实测确认的策略",
   "flag.json": "以 JSON 输出",
   "flag.no_tui": "禁用 TUI，使用纯文本输出",
-
   "plan.title": "执行计划",
   "plan.empty": "无需变更：所有域名的证书都已是最新。",
   "plan.col.account": "账号",
@@ -45,18 +42,15 @@
   "plan.col.strategy": "策略",
   "plan.col.risk": "风险",
   "plan.summary": "计划共 {total} 条：待应用 {apply}，已最新 {uptodate}，无可用证书 {nocert}",
-
   "action.apply": "应用证书",
   "action.delete": "删除证书",
   "action.uptodate": "已最新",
   "action.foreign": "外部证书",
   "action.nocert": "无可用证书",
   "action.needs_manual": "需人工处理",
-
   "risk.low": "低",
   "risk.medium": "中",
   "risk.high": "高",
-
   "clean.title": "清理计划",
   "clean.candidates": "候选删除 {count} 张证书",
   "clean.skipped": "已跳过 {count} 张（附原因）",
@@ -67,11 +61,9 @@
   "clean.reason.protected": "命中保护名单",
   "clean.reason.free": "免费证书默认不清理",
   "clean.reason.hosted": "证书处于托管状态",
-
   "msg.plan_only": "以上为演练结果，未写入云端。确认无误后加 --yes 执行。",
   "msg.nothing_to_do": "没有需要处理的内容。",
   "msg.fail_on_changes": "检测到待执行变更。",
-
   "doctor.title": "环境自检",
   "doctor.check.config": "配置文件",
   "doctor.check.local_config": "项目级配置",
@@ -83,7 +75,6 @@
   "doctor.ok": "通过",
   "doctor.warn": "警告",
   "doctor.fail": "失败",
-
   "account.list_title": "已登记账号",
   "account.none": "尚未登记任何账号，请先执行 orbit account add",
   "account.added": "已登记账号 {alias}",
@@ -97,12 +88,10 @@
   "account.not_found": "账号 {alias} 不存在。",
   "account.header": "别名",
   "account.header_secret": "SecretId",
-
   "config.path": "配置文件：{path}",
   "config.saved": "已写入 {path}",
   "config.unknown_key": "未知配置项：{key}",
   "config.usage": "用法：orbit config <show|path|set> [key] [value] [--global|--local]",
-
   "err.generic": "发生错误：{error}",
   "err.config_load": "读取配置失败：{error}",
   "err.credentials_load": "读取凭证失败：{error}",
@@ -116,7 +105,6 @@
   "err.no_accounts": "配置中没有登记任何账号。",
   "err.invalid_products": "不支持的产品：{value}（本批次支持：cdn, teo）",
   "err.gate_experimental": "策略 {strategy} 尚未实测确认，需要 --enable-experimental-write。",
-
   "account.list.short": "列出已登记账号",
   "account.add.short": "交互式登记账号并保存凭证",
   "account.remove.short": "删除已登记账号",
@@ -136,6 +124,23 @@
   "cloud.check.credentials": "云平台凭证",
   "cloud.check.service_role": "服务角色授权",
   "err.account_needs_input": "非交互模式下无法读取凭证，请使用 --from-stdin 或环境变量。",
-
-  "hint.chmod": "提示：chmod 600 {path}"
+  "hint.chmod": "提示：chmod 600 {path}",
+  "cloud.err.role_missing": "服务角色未授权：请在控制台授权 SSL_QCSLinkedRoleInReplaceLoadCertificate 后重试",
+  "cloud.err.cert_mismatch": "证书与域名不匹配：请核对该证书的 SAN 是否覆盖目标域名",
+  "cloud.err.cert_expired": "证书已过期或尚未生效，请先完成证书上传/签发",
+  "cloud.err.no_icp": "域名未备案（备案同步约需 2 小时），该域名已跳过",
+  "cloud.err.pending_record": "该证书在该资源类型上已有进行中的部署任务，稍后重试即可",
+  "cloud.err.rate_limited": "触发腾讯云限流，已自动退避重试；如持续失败请降低并发",
+  "cloud.err.region_required": "该资源类型必须携带地域参数（内部错误，请反馈）",
+  "cloud.err.region_invalid": "地域参数不被接受（内部错误，请反馈）",
+  "cloud.err.deploy_failed": "部署任务失败，请查看返回的 RequestId 并在控制台核对",
+  "cloud.err.verify_failed": "写入已提交但回读未确认，请稍后在控制台或 status 中复核",
+  "cloud.err.not_found": "目标不存在或不属于当前账号（域名/站点/证书）",
+  "cloud.err.delete_kept_bound": "仍被云资源引用，已保留未删除",
+  "cloud.err.delete_kept_timeout": "关联查询超时，证据不足已保留未删除",
+  "cloud.err.delete_role_missing": "删除需要服务角色授权，未授权时不执行删除",
+  "cloud.err.no_real_name": "账号尚未通过实名认证，无法部署证书",
+  "cloud.err.unknown": "云端返回未预期的错误，请附带 RequestId 反馈",
+  "cloud.err.auth_failed": "凭证无效或已过期：请核对 SecretId / SecretKey（AuthFailure）",
+  "cloud.err.no_permission": "当前子账号缺少所需权限：请对照 README 附录中的 CAM 策略授予只读/写权限"
 }

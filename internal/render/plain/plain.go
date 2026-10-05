@@ -90,14 +90,22 @@ func Results(w io.Writer, b *i18n.Bundle, results []core.Result) int {
 		if !r.OK {
 			state = "failed"
 			failed++
+		} else if !r.Verified {
+			state = "unverified"
 		}
 		target := ""
 		if r.Change.To != nil {
 			target = r.Change.To.ID
 		}
 		detail := ""
+		if r.MessageKey != "" {
+			detail = b.T(r.MessageKey)
+		}
 		if r.Err != nil {
-			detail = r.Err.Error()
+			if detail != "" {
+				detail += " | "
+			}
+			detail += r.Err.Error()
 		}
 		if r.ErrCode != "" {
 			detail = r.ErrCode + " " + detail

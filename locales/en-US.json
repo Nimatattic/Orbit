@@ -1,7 +1,6 @@
 {
   "app.name": "Orbit",
   "app.tagline": "Multi-cloud certificate orchestration and inspection",
-
   "root.short": "Orbit — cloud certificate orchestration and inspection",
   "status.short": "Read-only inventory of certificates, resources and to-dos",
   "update.short": "Match and apply SSL certificates",
@@ -10,7 +9,6 @@
   "config.short": "Inspect and modify configuration",
   "doctor.short": "Environment self-check: config, credentials, access, locales",
   "version.short": "Print version information",
-
   "flag.lang": "Output language (zh-CN / en-US)",
   "flag.config": "Path to the configuration file",
   "flag.local": "Use the project-level configuration ./.orbit.yaml",
@@ -32,7 +30,6 @@
   "flag.experimental_write": "Allow strategies that are not verified yet",
   "flag.json": "Emit JSON output",
   "flag.no_tui": "Disable the TUI and print plain text",
-
   "plan.title": "Execution plan",
   "plan.empty": "Nothing to do: every domain already uses the best certificate.",
   "plan.col.account": "Account",
@@ -45,18 +42,15 @@
   "plan.col.strategy": "Strategy",
   "plan.col.risk": "Risk",
   "plan.summary": "{total} change(s): {apply} to apply, {uptodate} up to date, {nocert} without a usable certificate",
-
   "action.apply": "apply",
   "action.delete": "delete",
   "action.uptodate": "up to date",
   "action.foreign": "foreign cert",
   "action.nocert": "no usable cert",
   "action.needs_manual": "manual action",
-
   "risk.low": "low",
   "risk.medium": "medium",
   "risk.high": "high",
-
   "clean.title": "Cleanup plan",
   "clean.candidates": "{count} certificate(s) eligible for deletion",
   "clean.skipped": "{count} certificate(s) skipped (with reasons)",
@@ -67,11 +61,9 @@
   "clean.reason.protected": "matched by the protection list",
   "clean.reason.free": "free certificates are not cleaned by default",
   "clean.reason.hosted": "certificate is hosted",
-
   "msg.plan_only": "The above is a dry run; nothing was written. Re-run with --yes to apply.",
   "msg.nothing_to_do": "Nothing to do.",
   "msg.fail_on_changes": "Pending changes detected.",
-
   "doctor.title": "Environment self-check",
   "doctor.check.config": "configuration file",
   "doctor.check.local_config": "project configuration",
@@ -83,7 +75,6 @@
   "doctor.ok": "ok",
   "doctor.warn": "warn",
   "doctor.fail": "fail",
-
   "account.list_title": "Registered accounts",
   "account.none": "No account registered yet; run orbit account add first.",
   "account.added": "Registered account {alias}",
@@ -97,12 +88,10 @@
   "account.not_found": "Account {alias} does not exist.",
   "account.header": "Alias",
   "account.header_secret": "SecretId",
-
   "config.path": "Configuration file: {path}",
   "config.saved": "Wrote {path}",
   "config.unknown_key": "Unknown configuration key: {key}",
   "config.usage": "Usage: orbit config <show|path|set> [key] [value] [--global|--local]",
-
   "err.generic": "Error: {error}",
   "err.config_load": "Failed to load configuration: {error}",
   "err.credentials_load": "Failed to load credentials: {error}",
@@ -116,7 +105,6 @@
   "err.no_accounts": "No account is registered in the configuration.",
   "err.invalid_products": "Unsupported product: {value} (this batch supports: cdn, teo)",
   "err.gate_experimental": "Strategy {strategy} is not verified yet; pass --enable-experimental-write.",
-
   "account.list.short": "List registered accounts",
   "account.add.short": "Register an account and store its credentials",
   "account.remove.short": "Remove a registered account",
@@ -136,6 +124,23 @@
   "cloud.check.credentials": "cloud credentials",
   "cloud.check.service_role": "service role authorization",
   "err.account_needs_input": "Cannot read credentials non-interactively; use --from-stdin or environment variables.",
-
-  "hint.chmod": "Hint: chmod 600 {path}"
+  "hint.chmod": "Hint: chmod 600 {path}",
+  "cloud.err.role_missing": "Service role not authorised: grant SSL_QCSLinkedRoleInReplaceLoadCertificate and retry",
+  "cloud.err.cert_mismatch": "Certificate does not match the domain: check that its SAN covers the target",
+  "cloud.err.cert_expired": "Certificate is expired or not yet valid; finish uploading/issuing it first",
+  "cloud.err.no_icp": "Domain has no ICP filing (sync takes about 2 hours); it was skipped",
+  "cloud.err.pending_record": "An in-flight deploy task already exists for this certificate and resource type; retry later",
+  "cloud.err.rate_limited": "Cloud rate limit hit; Orbit backed off automatically — lower concurrency if it persists",
+  "cloud.err.region_required": "This resource type requires a region (internal error, please report)",
+  "cloud.err.region_invalid": "Region was rejected (internal error, please report)",
+  "cloud.err.deploy_failed": "Deploy task failed; check the RequestId and the console",
+  "cloud.err.verify_failed": "Write submitted but read-back did not confirm it; re-check with status later",
+  "cloud.err.not_found": "Target not found or not owned by this account (domain/site/certificate)",
+  "cloud.err.delete_kept_bound": "Still referenced by a cloud resource; kept, not deleted",
+  "cloud.err.delete_kept_timeout": "Association query timed out; kept due to insufficient evidence",
+  "cloud.err.delete_role_missing": "Deletion needs service role authorisation; nothing was deleted",
+  "cloud.err.no_real_name": "Account has not completed real-name verification; certificates cannot be deployed",
+  "cloud.err.unknown": "Unexpected cloud error; please report it together with the RequestId",
+  "cloud.err.auth_failed": "Credentials are invalid or expired: check SecretId / SecretKey (AuthFailure)",
+  "cloud.err.no_permission": "This sub-account lacks the required permission: grant the CAM policy from the README appendix"
 }

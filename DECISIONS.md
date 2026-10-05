@@ -77,3 +77,4 @@ v1 的删除范围是"**全部 `FilterSource=upload` 的证书**"，没有别名
 | 2026-10 | 文档调研回填：CDN/TEO 写路径确定（T1/T2）、状态枚举分开建模（T8）、EdgeOne 语义明确（T9）；待实测降为 V1–V6 |
 | 2026-10 | **B1–B7 全部确认**；B3 决定 v1 不做额外范围层 → 记录 §3.1 已接受风险；B2b 明确为"按 B2a 选优后默认替换"；**开工 M0** |
 | 2026-10 | **M0 完成**：CLI/配置分层/凭证(0600)/i18n/退出码/fake provider 落地；匹配选优、计划、清理四道闸门提前完成并通过单测。过程中修掉两个真实缺陷：① `HostingStatus` 零值与"托管中"撞车（改为指针，缺失≠未托管）；② 配置合并方向写反（本地未覆盖全局）。另修 `account add` 只写凭证不登记配置导致账号不可见 |
+| 2026-10 | **M1 完成**：接入官方 SDK（ssl/cdn/teo），实现证书池、CDN 域名与 EdgeOne 站点/域名枚举、证书↔资源关联查询、三条写入路径（CDN `ModifyDomainConfig(Route=Https.CertInfo.CertId)`、EdgeOne `ModifyHostsCertificate(Mode=sslcert)`、SSL `DeployCertificateInstance`）与**回读复核**；`IsSync` 在 provider 边界强制为 true（即使调用方传 false）。限流按官方 QPS 分产品令牌桶，错误码映射为可行动提示。新增 20 项回放测试（不打真实 API）。真机验证步骤见 docs/VERIFY_M1.md |

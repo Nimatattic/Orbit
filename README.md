@@ -7,6 +7,7 @@
 设计与事实依据：
 
 - 方案与选型：[docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)
+- 真机验证步骤（M1）：[docs/VERIFY_M1.md](docs/VERIFY_M1.md)
 - 腾讯云 API 事实清单（逐条来源 + 待实测项）：[docs/TENCENT_API_NOTES.md](docs/TENCENT_API_NOTES.md)
 - 已确认决策与已接受风险：[DECISIONS.md](DECISIONS.md)
 
@@ -17,15 +18,15 @@
 | 里程碑 | 状态 |
 | --- | --- |
 | M0 骨架：CLI、配置分层、凭证存储、i18n、退出码、匹配引擎、清理门禁、fake provider | ✅ 完成 |
-| M1 只读采集：腾讯云 SDK 接入（证书池 / CDN 域名 / EdgeOne 站点域名 / 关联查询） | ⏳ 未开始 |
+| M1 只读采集：腾讯云 SDK 接入（证书池 / CDN 域名 / EdgeOne 站点域名 / 关联查询） | ✅ 完成（回放测试覆盖；待你用真实账号按 [VERIFY_M1](docs/VERIFY_M1.md) 核对） |
 | M2 匹配引擎打磨（计划渲染、风险分级已可用） | 部分可用 |
-| M3 应用执行（`ModifyDomainConfig` / `ModifyHostsCertificate`） | ⏳ 未开始 |
+| M3 应用执行（`ModifyDomainConfig` / `ModifyHostsCertificate`） | ◐ 写入与回读复核已实现并测试；审计日志与并发调优待补 |
 | M4 清理执行（删除 + 证书材料备份 + 任务状态分类） | ⏳ 未开始 |
 | M5 TUI（多 Tab、账号多选、计划预览） | ⏳ 未开始 |
 | M6 交付（打包、cron/systemd、CAM 模板） | ⏳ 未开始 |
 
-**现在能做什么**：配置与凭证管理、环境自检、多语言、以及用内置演示数据跑通「采集 → 匹配 → 计划 → 清理候选」全链路（永不触网）。
-**还不能做什么**：访问真实腾讯云账号——`tencent` provider 目前对每个方法返回 `ErrNotImplemented`，M1 才会接入 SDK。
+**现在能做什么**：真实腾讯云账号的只读采集（证书池 / CDN 域名 / EdgeOne 站点与域名 / 证书↔资源关联查询）、匹配与计划、清理候选；写入路径（CDN `ModifyDomainConfig`、EdgeOne `ModifyHostsCertificate`、SSL `DeployCertificateInstance`）已实现并带**回读复核**；另外还有配置与凭证管理、环境自检、多语言、以及完全不触网的 `--demo` 演示链路。
+**还不能做什么**：多 Tab TUI（M5）、审计日志与证书材料备份（M4）、`--strategy=deploy` 对 CDN（见 [VERIFY_M1](docs/VERIFY_M1.md) 已知边界）。
 
 ---
 
