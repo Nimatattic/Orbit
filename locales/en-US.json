@@ -143,7 +143,7 @@
   "cloud.err.unknown": "Unexpected cloud error; please report it together with the RequestId",
   "cloud.err.auth_failed": "Credentials are invalid or expired: check SecretId / SecretKey (AuthFailure)",
   "cloud.err.no_permission": "This account has no permission for this product, or the product is not activated (AdministratorAccess does not activate a service); the error above names the failing API and account",
-  "scan.warning": "scan warning: {product} / {action} failed ({code}): {hint}",
+  "scan.warning": "scan warning: {product}{scope} / {action} failed ({code}): {hint}",
   "scan.refused": "Some products could not be scanned, so the cleanup evidence is incomplete; refusing to run. Re-run with --permit-partial-scan to force it.",
   "cloud.check.ssl": "SSL certificates (ssl:DescribeCertificates)",
   "cloud.check.cdn": "CDN (cdn:DescribeDomainsConfig)",

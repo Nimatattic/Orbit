@@ -143,7 +143,7 @@
   "cloud.err.unknown": "云端返回未预期的错误，请附带 RequestId 反馈",
   "cloud.err.auth_failed": "凭证无效或已过期：请核对 SecretId / SecretKey（AuthFailure）",
   "cloud.err.no_permission": "该账号在此产品上无权限，或该产品尚未开通（AdministratorAccess 不代替服务开通）；上报错信息里已标明失败的具体 API 与账号",
-  "scan.warning": "扫描告警：{product} / {action} 失败（{code}）：{hint}",
+  "scan.warning": "扫描告警：{product}{scope} / {action} 失败（{code}）：{hint}",
   "scan.refused": "有产品未能成功扫描，清理证据不完整，已拒绝执行清理；确认风险后可加 --permit-partial-scan 强制继续",
   "cloud.check.ssl": "SSL 证书服务（ssl:DescribeCertificates）",
   "cloud.check.cdn": "CDN（cdn:DescribeDomainsConfig）",

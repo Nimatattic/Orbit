@@ -200,8 +200,16 @@ func (a *App) renderWarnings(warnings []cloud.ScanWarning) {
 		if w.MessageKey != "" {
 			hint = a.Bundle.T(w.MessageKey)
 		}
+		scope := ""
+		if w.Scope != "" {
+			if a.Bundle.Lang() == "zh-CN" {
+				scope = "（" + w.Scope + "）"
+			} else {
+				scope = " (" + w.Scope + ")"
+			}
+		}
 		fmt.Fprintln(a.Err, a.Bundle.T("scan.warning",
-			"product", w.Product, "action", w.Action, "code", w.Code, "hint", hint))
+			"product", w.Product, "scope", scope, "action", w.Action, "code", w.Code, "hint", hint))
 		// Informational warnings explain themselves; only blocking ones benefit
 		// from the raw cloud error.
 		if w.Err != nil && !w.Informational {
