@@ -83,7 +83,8 @@ make release          # linux/amd64, linux/arm64, darwin/arm64 静态二进制
 printf 'AKIDxxx\nSECRETxxx\n' | ./bin/orbit account add --alias hk --from-stdin
 
 ./bin/orbit account list
-./bin/orbit account test --accounts=main   # 按 SSL/CDN/EdgeOne 逐产品探测权限
+./bin/orbit account test --accounts=main             # 按 SSL/CDN/EdgeOne 逐产品探测，并显示凭证归属
+./bin/orbit account test --accounts=main --products=teo   # 只复查某一个产品
 ./bin/orbit doctor
 ```
 

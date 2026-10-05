@@ -10,6 +10,7 @@ import (
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/profile"
 	ssl "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl/v20191205"
+	sts "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/sts/v20180813"
 	teo "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/teo/v20220901"
 )
 
@@ -93,8 +94,14 @@ type teoAPI interface {
 	ModifyHostsCertificate(*teo.ModifyHostsCertificateRequest) (*teo.ModifyHostsCertificateResponse, error)
 }
 
-// newSDKClients builds the three product clients sharing one credential.
-func newSDKClients(opts Options) (sslAPI, cdnAPI, teoAPI, error) {
+// stsAPI is the subset of the STS client Orbit calls, used to report which
+// account a credential actually belongs to.
+type stsAPI interface {
+	GetCallerIdentity(*sts.GetCallerIdentityRequest) (*sts.GetCallerIdentityResponse, error)
+}
+
+// newSDKClients builds the product clients sharing one credential.
+func newSDKClients(opts Options) (sslAPI, cdnAPI, teoAPI, stsAPI, error) {
 	credential := common.NewCredential(opts.SecretID, opts.SecretKey)
 
 	profileFor := func() *profile.ClientProfile {
@@ -112,17 +119,21 @@ func newSDKClients(opts Options) (sslAPI, cdnAPI, teoAPI, error) {
 
 	sslClient, err := ssl.NewClient(credential, opts.Region, profileFor())
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	cdnClient, err := cdn.NewClient(credential, opts.Region, profileFor())
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	teoClient, err := teo.NewClient(credential, opts.Region, profileFor())
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	return sslClient, cdnClient, teoClient, nil
+	stsClient, err := sts.NewClient(credential, opts.Region, profileFor())
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	return sslClient, cdnClient, teoClient, stsClient, nil
 }
 
 // shanghai is the timezone Tencent Cloud uses for the naive timestamps it

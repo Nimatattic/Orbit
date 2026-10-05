@@ -23,6 +23,7 @@ import (
 	cdn "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdn/v20180606"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 	ssl "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl/v20191205"
+	sts "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/sts/v20180813"
 	teo "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/teo/v20220901"
 
 	"github.com/Crequency/orbit/internal/cloud"
@@ -36,6 +37,7 @@ type Provider struct {
 	ssl      sslAPI
 	cdn      cdnAPI
 	teo      teoAPI
+	sts      stsAPI
 	limiters map[string]*limiter
 	now      func() time.Time
 	sleep    func(context.Context, time.Duration) error
@@ -44,27 +46,33 @@ type Provider struct {
 // New builds a provider bound to one account.
 func New(account string, opts Options) (*Provider, error) {
 	opts = opts.withDefaults()
-	sslClient, cdnClient, teoClient, err := newSDKClients(opts)
+	sslClient, cdnClient, teoClient, stsClient, err := newSDKClients(opts)
 	if err != nil {
 		return nil, err
 	}
-	return newWithClients(account, opts, sslClient, cdnClient, teoClient), nil
+	return newWithClients(account, opts, sslClient, cdnClient, teoClient, stsClient), nil
 }
 
-func newWithClients(account string, opts Options, sslClient sslAPI, cdnClient cdnAPI, teoClient teoAPI) *Provider {
+func newWithClients(account string, opts Options, sslClient sslAPI, cdnClient cdnAPI, teoClient teoAPI, stsClients ...stsAPI) *Provider {
 	now := time.Now
+	var stsClient stsAPI
+	if len(stsClients) > 0 {
+		stsClient = stsClients[0]
+	}
 	return &Provider{
 		account: account,
 		opts:    opts,
 		ssl:     sslClient,
 		cdn:     cdnClient,
 		teo:     teoClient,
+		sts:     stsClient,
 		now:     now,
 		sleep:   sleepCtx,
 		limiters: map[string]*limiter{
 			"ssl": newLimiter(sslQPS, now, sleepCtx),
 			"cdn": newLimiter(cdnQPS, now, sleepCtx),
 			"teo": newLimiter(teoQPS, now, sleepCtx),
+			"sts": newLimiter(sslQPS, now, sleepCtx),
 		},
 	}
 }
@@ -107,7 +115,12 @@ func (p *Provider) Capabilities() cloud.Capabilities {
 // sub-account with a broad policy can still hit a product that is not activated
 // for the account.
 func (p *Provider) Preflight(ctx context.Context, _ string) ([]core.Check, error) {
-	checks := make([]core.Check, 0, 4)
+	checks := make([]core.Check, 0, 6)
+
+	// Identity first: "no permission" is often "granted on another sub-account".
+	if p.sts != nil {
+		checks = append(checks, p.identityCheck(ctx))
+	}
 
 	probe := func(key, action string, call func() error) {
 		if err := call(); err != nil {
@@ -154,6 +167,31 @@ func (p *Provider) Preflight(ctx context.Context, _ string) ([]core.Check, error
 		Detail: "SSL_QCSLinkedRoleInReplaceLoadCertificate is verified on the first write",
 	})
 	return checks, nil
+}
+
+// identityCheck reports which account the stored credential belongs to.
+func (p *Provider) identityCheck(ctx context.Context) core.Check {
+	key := "cloud.check.identity"
+	req := sts.NewGetCallerIdentityRequest()
+	resp, err := call(ctx, p.limiter("sts"), p.opts.MaxAttempts, func() (*sts.GetCallerIdentityResponse, error) {
+		return p.sts.GetCallerIdentity(req)
+	})
+	if err != nil {
+		code, hint, _ := ErrorInfo(err)
+		return core.Check{
+			Key: key, Status: core.CheckFail, Detail: code, MessageKey: hint,
+			Err: withAction(err, p.account, "sts:GetCallerIdentity"),
+		}
+	}
+	if resp == nil || resp.Response == nil {
+		return core.Check{Key: key, Status: core.CheckWarn, Detail: "empty response"}
+	}
+	r := resp.Response
+	return core.Check{
+		Key:    key,
+		Status: core.CheckOK,
+		Detail: fmt.Sprintf("AccountId=%s Type=%s UserId=%s", str(r.AccountId), str(r.Type), str(r.UserId)),
+	}
 }
 
 // Scan implements cloud.Provider: one pass over certificates, both products and

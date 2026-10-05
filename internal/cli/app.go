@@ -45,6 +45,7 @@ type App struct {
 	JSON       bool
 	Progress   bool
 	NoProgress bool
+	NoCache    bool
 
 	// Command flags shared by update/clean/status.
 	Accounts    string
@@ -403,6 +404,7 @@ func (a *App) newRootCmd() *cobra.Command {
 	pf.BoolVar(&a.JSON, "json", false, "")
 	pf.BoolVar(&a.Progress, "progress", false, "")
 	pf.BoolVar(&a.NoProgress, "no-progress", false, "")
+	pf.BoolVar(&a.NoCache, "no-cache", false, "")
 
 	root.AddCommand(
 		a.newStatusCmd(),

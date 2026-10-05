@@ -167,6 +167,34 @@ M1 里最容易出错的一点：EdgeOne 域名的证书配置由 `Certificate.M
 
 
 
+
+### 已经给了 EdgeOne 权限，但 `teo` 仍报无权限？
+
+**先排除缓存**：`status` 的缓存只作用于"证书 ↔ 云资源"的关联查询（`IsCache=1`）。EdgeOne 的站点枚举（`teo:DescribeZones`）每次都是实时调用，**不存在缓存**。所以权限改完直接重跑即可；想连关联查询也强制实时，用 `--no-cache`。
+
+然后按顺序确认三件事：
+
+```bash
+# 1) 凭证到底属于哪个账号/子账号（关键：权限可能授给了别的子账号）
+./bin/orbit account test --accounts=main
+#   看第一行「凭证归属」：AccountId=1000xxxx Type=CAMUser UserId=xxxx
+#   拿这个 AccountId/UserId 去 CAM 控制台核对，确认权限加在了同一个身份上
+
+# 2) 只复查 EdgeOne（换完权限立刻验证，路径最短）
+./bin/orbit account test --accounts=main --products=teo
+
+# 3) 若仍失败，看错误码判断性质
+```
+
+| 现象 | 含义 |
+| --- | --- |
+| 「凭证归属」通过，但 teo 仍 `UnauthorizedOperation` | 权限已给到该身份，但 **EdgeOne 服务本身未开通**（CDN/EdgeOne 需各自在控制台开通，EdgeOne 还要绑套餐）；或策略里没有覆盖 `teo:DescribeZones` 这个具体 action |
+| 「凭证归属」显示的是**另一个** UserId/AccountId | 权限授给了别的子账号；用 `orbit account add --alias main --force` 重新录入正确的密钥 |
+| 「凭证归属」本身 `AuthFailure` | 密钥无效，与权限无关，先重录密钥 |
+| 所有产品都通过，只有 teo 失败 | 与密钥无关，是 EdgeOne 侧的开通/策略问题 |
+
+> 权限变更在腾讯云通常是立即生效的（无需等待）；如果刚授完就在同一秒重试仍失败，多半是上面第 1、2 类原因，而不是传播延迟。
+
 ## 扫描进度与首次运行的耗时
 
 `status` / `update` / `clean` 会向 **stderr** 打印分级进度（stdout 只放结果，`--json` 不受影响）：

@@ -15,6 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/Crequency/orbit/internal/config"
+	"github.com/Crequency/orbit/internal/core"
 	"github.com/Crequency/orbit/internal/credential"
 	"github.com/Crequency/orbit/internal/exitcode"
 	"github.com/Crequency/orbit/internal/render/plain"
@@ -347,6 +348,15 @@ func (a *App) newAccountRemoveCmd() *cobra.Command {
 	return cmd
 }
 
+// checkProduct maps a preflight check to the product it probes, so that
+// `account test --products=teo` can re-check a single product after a
+// permission change.
+var checkProduct = map[string]string{
+	"cloud.check.ssl": "ssl",
+	"cloud.check.cdn": "cdn",
+	"cloud.check.teo": "teo",
+}
+
 func (a *App) newAccountTestCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "test",
@@ -367,9 +377,11 @@ func (a *App) newAccountTestCmd() *cobra.Command {
 				if err != nil {
 					return a.mapProviderErr(err, provider.Name())
 				}
+				wanted := splitList(a.Products)
+				checks = filterChecks(checks, wanted)
 				plain.Checks(a.Out, a.Bundle, checks)
 				for _, c := range checks {
-					if c.Status == "fail" {
+					if c.Status == core.CheckFail {
 						failed = true
 					}
 				}
@@ -382,7 +394,27 @@ func (a *App) newAccountTestCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&a.Accounts, "accounts", "", "")
 	cmd.Flags().BoolVar(&a.AllAccounts, "all-accounts", false, "")
+	cmd.Flags().StringVar(&a.Products, "products", "", "")
 	return cmd
+}
+
+// filterChecks keeps credential/role checks and only the requested products.
+func filterChecks(checks []core.Check, products []string) []core.Check {
+	if len(products) == 0 {
+		return checks
+	}
+	want := map[string]bool{}
+	for _, p := range products {
+		want[p] = true
+	}
+	out := make([]core.Check, 0, len(checks))
+	for _, c := range checks {
+		product, isProduct := checkProduct[c.Key]
+		if !isProduct || want[product] {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func (a *App) newDoctorCmd() *cobra.Command {

@@ -19,9 +19,10 @@ import (
 // stubProvider lets the CLI be exercised without configuration files, real
 // credentials or network access.
 type stubProvider struct {
-	scan   cloud.ScanResult
-	apply  []core.Result
-	delete []core.Result
+	scan      cloud.ScanResult
+	apply     []core.Result
+	delete    []core.Result
+	lastScope cloud.ScanScope
 }
 
 func (s *stubProvider) Name() string                     { return "tencent" }
@@ -29,7 +30,8 @@ func (s *stubProvider) Capabilities() cloud.Capabilities { return cloud.Capabili
 func (s *stubProvider) Preflight(context.Context, string) ([]core.Check, error) {
 	return nil, nil
 }
-func (s *stubProvider) Scan(context.Context, string, cloud.ScanScope) (cloud.ScanResult, error) {
+func (s *stubProvider) Scan(_ context.Context, _ string, scope cloud.ScanScope) (cloud.ScanResult, error) {
+	s.lastScope = scope
 	return s.scan, nil
 }
 func (s *stubProvider) ListCertificates(context.Context, string, cloud.ScanScope) ([]core.Certificate, error) {
@@ -181,5 +183,60 @@ func TestActionableWarningsKeepTheirDetail(t *testing.T) {
 	}
 	if !strings.Contains(got, "CdnHostNoIcp") {
 		t.Fatalf("actionable warnings keep their code, got %q", got)
+	}
+}
+
+func TestStatusUsesCachedEvidenceByDefaultAndFreshWithNoCache(t *testing.T) {
+	provider := &stubProvider{}
+	app := testApp(t, provider)
+
+	if err := app.runStatus(context.Background()); err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if !provider.lastScope.CachedEvidence {
+		t.Fatal("status should reuse the cloud's association cache by default")
+	}
+
+	app.NoCache = true
+	if err := app.runStatus(context.Background()); err != nil {
+		t.Fatalf("status --no-cache: %v", err)
+	}
+	if provider.lastScope.CachedEvidence {
+		t.Fatal("--no-cache must force a live association query")
+	}
+}
+
+func TestUpdateNeverUsesCachedEvidence(t *testing.T) {
+	provider := &stubProvider{}
+	app := testApp(t, provider)
+
+	if err := app.runUpdate(context.Background()); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if provider.lastScope.CachedEvidence {
+		t.Fatal("update must never act on cached association evidence")
+	}
+}
+
+func TestAccountTestProductFilterKeepsIdentityAndRole(t *testing.T) {
+	checks := []core.Check{
+		{Key: "cloud.check.identity", Status: core.CheckOK},
+		{Key: "cloud.check.ssl", Status: core.CheckOK},
+		{Key: "cloud.check.cdn", Status: core.CheckFail},
+		{Key: "cloud.check.teo", Status: core.CheckOK},
+		{Key: "cloud.check.service_role", Status: core.CheckWarn},
+	}
+	got := filterChecks(checks, []string{"teo"})
+	keys := map[string]bool{}
+	for _, c := range got {
+		keys[c.Key] = true
+	}
+	if keys["cloud.check.cdn"] {
+		t.Fatal("--products=teo must drop the cdn probe")
+	}
+	for _, want := range []string{"cloud.check.identity", "cloud.check.teo", "cloud.check.service_role"} {
+		if !keys[want] {
+			t.Errorf("--products=teo must keep %s", want)
+		}
 	}
 }

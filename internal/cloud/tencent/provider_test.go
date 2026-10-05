@@ -13,6 +13,7 @@ import (
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 	tcerr "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/errors"
 	ssl "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl/v20191205"
+	sts "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/sts/v20180813"
 	teo "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/teo/v20220901"
 
 	"github.com/Crequency/orbit/internal/cloud"
@@ -50,6 +51,11 @@ func (c *clock) sleep(_ context.Context, d time.Duration) error {
 // testProvider wires fakes with a virtual clock so polls never really wait.
 func testProvider(t *testing.T, s sslAPI, c cdnAPI, e teoAPI) *Provider {
 	t.Helper()
+	return testProviderWithSTS(t, s, c, e, nil)
+}
+
+func testProviderWithSTS(t *testing.T, s sslAPI, c cdnAPI, e teoAPI, stsClient stsAPI) *Provider {
+	t.Helper()
 	opts := Options{
 		Region:       "ap-guangzhou",
 		PollInterval: time.Second,
@@ -58,7 +64,7 @@ func testProvider(t *testing.T, s sslAPI, c cdnAPI, e teoAPI) *Provider {
 	}.withDefaults()
 
 	clk := newClock()
-	p := newWithClients("demo", opts, s, c, e)
+	p := newWithClients("demo", opts, s, c, e, stsClient)
 	p.now = clk.now
 	p.sleep = clk.sleep
 	p.limiters = map[string]*limiter{
@@ -187,6 +193,20 @@ func (f *fakeSSL) DescribeDeleteCertificatesTaskResult(*ssl.DescribeDeleteCertif
 	}
 	f.deletePollIdx++
 	return f.deletePollResponses[idx], nil
+}
+
+// ---------------------------------------------------------------- fake STS
+
+type fakeSTS struct {
+	response *sts.GetCallerIdentityResponse
+	err      error
+}
+
+func (f *fakeSTS) GetCallerIdentity(*sts.GetCallerIdentityRequest) (*sts.GetCallerIdentityResponse, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.response, nil
 }
 
 // ---------------------------------------------------------------- fake CDN
@@ -821,7 +841,12 @@ func TestScanFailsWhenCertificatePoolIsUnavailable(t *testing.T) {
 
 func TestPreflightReportsEachProductSeparately(t *testing.T) {
 	teoFake := &fakeTEO{failZones: tcerr.NewTencentCloudSDKError("UnauthorizedOperation", "操作无权限。", "req-11")}
-	p := testProvider(t, &fakeSSL{}, &fakeCDN{}, teoFake)
+	stsFake := &fakeSTS{response: &sts.GetCallerIdentityResponse{Response: &sts.GetCallerIdentityResponseParams{
+		AccountId: common.StringPtr("100012345678"),
+		Type:      common.StringPtr("CAMUser"),
+		UserId:    common.StringPtr("1234567"),
+	}}}
+	p := testProviderWithSTS(t, &fakeSSL{}, &fakeCDN{}, teoFake, stsFake)
 
 	checks, err := p.Preflight(context.Background(), "main")
 	if err != nil {
@@ -840,6 +865,36 @@ func TestPreflightReportsEachProductSeparately(t *testing.T) {
 	if status["cloud.check.service_role"] != core.CheckWarn {
 		t.Fatalf("the service role cannot be probed read-only: %+v", status)
 	}
+	if status["cloud.check.identity"] != core.CheckOK {
+		t.Fatalf("the credential identity should be reported: %+v", status)
+	}
+	for _, c := range checks {
+		if c.Key == "cloud.check.identity" {
+			if !strings.Contains(c.Detail, "100012345678") || !strings.Contains(c.Detail, "CAMUser") {
+				t.Fatalf("identity detail must name the account and type, got %q", c.Detail)
+			}
+		}
+	}
+}
+
+func TestPreflightReportsIdentityFailure(t *testing.T) {
+	stsFake := &fakeSTS{err: tcerr.NewTencentCloudSDKError("AuthFailure.SecretIdNotFound", "no such id", "req-12")}
+	p := testProviderWithSTS(t, &fakeSSL{}, &fakeCDN{}, &fakeTEO{}, stsFake)
+
+	checks, err := p.Preflight(context.Background(), "main")
+	if err != nil {
+		t.Fatalf("preflight: %v", err)
+	}
+	for _, c := range checks {
+		if c.Key != "cloud.check.identity" {
+			continue
+		}
+		if c.Status != core.CheckFail || c.MessageKey != MsgAuthFailed {
+			t.Fatalf("identity failure must be reported with its hint: %+v", c)
+		}
+		return
+	}
+	t.Fatal("expected an identity check")
 }
 
 // ------------------------------------------------------------------ progress

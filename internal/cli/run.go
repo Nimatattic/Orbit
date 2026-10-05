@@ -418,8 +418,9 @@ func (a *App) runStatus(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		// status may reuse the cloud's short-lived association cache.
-		inputs, err := a.collect(ctx, provider, account, true)
+		// status may reuse the cloud's short-lived association cache unless the
+		// operator asks for fresh evidence.
+		inputs, err := a.collect(ctx, provider, account, !a.NoCache)
 		if err != nil {
 			return err
 		}
