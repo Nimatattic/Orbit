@@ -165,6 +165,9 @@ func (p *Provider) Scan(ctx context.Context, account string, scope cloud.ScanSco
 	p.emit("progress.teo.zones_done", "count", 1)
 	p.emit("progress.teo.zone_domains", "index", 1, "zones", 1, "zone", "zone-1 (demo)")
 	p.emit("progress.stage.teo_done", "count", teoCount)
+	if scope.SkipEvidence {
+		return cloud.ScanResult{Certificates: certs, Resources: resources, Evidence: map[string]core.BindingEvidence{}}, nil
+	}
 	ids := make([]string, 0, len(certs))
 	for _, c := range certs {
 		ids = append(ids, c.ID)

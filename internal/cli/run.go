@@ -88,7 +88,15 @@ type planInputs struct {
 	blocking  []cloud.ScanWarning
 }
 
-func (a *App) collect(ctx context.Context, provider cloud.Provider, account string, cachedEvidence bool) (*planInputs, error) {
+// collectOptions says which evidence the caller actually needs. Scanning the
+// association query is the slowest step, so callers that do not use it must say
+// so (update only plans from the pool and the resources).
+type collectOptions struct {
+	cachedEvidence bool
+	needEvidence   bool
+}
+
+func (a *App) collect(ctx context.Context, provider cloud.Provider, account string, opts collectOptions) (*planInputs, error) {
 	products, err := a.products(account)
 	if err != nil {
 		return nil, err
@@ -97,7 +105,8 @@ func (a *App) collect(ctx context.Context, provider cloud.Provider, account stri
 	scan, err := provider.Scan(ctx, account, cloud.ScanScope{
 		Products:       products,
 		Domains:        splitList(a.Domains),
-		CachedEvidence: cachedEvidence,
+		CachedEvidence: opts.cachedEvidence,
+		SkipEvidence:   !opts.needEvidence,
 	})
 	if err != nil {
 		return nil, a.mapProviderErr(err, provider.Name())
@@ -257,7 +266,9 @@ func (a *App) runUpdate(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		inputs, err := a.collect(ctx, provider, account, false)
+		// update plans from the pool and the resources only: the association
+		// query is not needed and would add minutes to every run.
+		inputs, err := a.collect(ctx, provider, account, collectOptions{})
 		if err != nil {
 			return err
 		}
@@ -337,7 +348,7 @@ func (a *App) runClean(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		inputs, err := a.collect(ctx, provider, account, false)
+		inputs, err := a.collect(ctx, provider, account, collectOptions{needEvidence: true})
 		if err != nil {
 			return err
 		}
@@ -472,7 +483,7 @@ func (a *App) runStatus(ctx context.Context) error {
 		}
 		// status may reuse the cloud's short-lived association cache unless the
 		// operator asks for fresh evidence.
-		inputs, err := a.collect(ctx, provider, account, !a.NoCache)
+		inputs, err := a.collect(ctx, provider, account, collectOptions{cachedEvidence: !a.NoCache, needEvidence: true})
 		if err != nil {
 			return err
 		}

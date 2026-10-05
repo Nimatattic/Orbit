@@ -243,6 +243,11 @@ func (p *Provider) Scan(ctx context.Context, _ string, scope cloud.ScanScope) (c
 	for _, c := range certs {
 		ids = append(ids, c.ID)
 	}
+	if scope.SkipEvidence {
+		// update only needs the pool and the resources; skip the slowest step.
+		res.Evidence = map[string]core.BindingEvidence{}
+		return res, nil
+	}
 	if len(ids) > 0 {
 		p.emit("progress.stage.bindings", "count", len(ids))
 		if !scope.CachedEvidence {

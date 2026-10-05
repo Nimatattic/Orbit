@@ -74,6 +74,13 @@ func BuildUpdatePlan(resources []Resource, certs []Certificate, opts PlanOptions
 		}
 	}
 
+	// Resolving bound ids against the pool lets the plan show the source of the
+	// certificate currently in place, not just its id.
+	pool := make(map[string]Certificate, len(certs))
+	for _, c := range certs {
+		pool[c.ID] = c
+	}
+
 	plan := Plan{Account: opts.Account, GeneratedAt: now}
 	for _, res := range resources {
 		if len(allowed) > 0 && !allowed[string(res.Product)] {
@@ -95,7 +102,7 @@ func BuildUpdatePlan(resources []Resource, certs []Certificate, opts PlanOptions
 			ResourceName: res.Name,
 			Domain:       domain,
 			InstanceKey:  res.InstanceKey,
-			From:         boundRef(res),
+			From:         boundRef(res, pool),
 		}
 
 		best, ok := BestFor(domain, certs, now, opts.Match)
@@ -137,10 +144,14 @@ func BuildUpdatePlan(resources []Resource, certs []Certificate, opts PlanOptions
 	return plan
 }
 
-func boundRef(res Resource) *CertRef {
+func boundRef(res Resource, pool map[string]Certificate) *CertRef {
 	if res.BoundCert == "" {
 		return nil
 	}
+	if c, ok := pool[res.BoundCert]; ok {
+		return Ref(c)
+	}
+	// Not in the pool: an EdgeOne free certificate, or one issued elsewhere.
 	return &CertRef{ID: res.BoundCert, NotAfter: res.BoundNotAfter}
 }
 

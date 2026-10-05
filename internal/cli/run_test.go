@@ -206,15 +206,37 @@ func TestStatusUsesCachedEvidenceByDefaultAndFreshWithNoCache(t *testing.T) {
 	}
 }
 
-func TestUpdateNeverUsesCachedEvidence(t *testing.T) {
+func TestUpdateSkipsTheAssociationQuery(t *testing.T) {
 	provider := &stubProvider{}
 	app := testApp(t, provider)
 
 	if err := app.runUpdate(context.Background()); err != nil {
 		t.Fatalf("update: %v", err)
 	}
+	if !provider.lastScope.SkipEvidence {
+		t.Fatal("update plans from the pool and resources only; the association query must be skipped")
+	}
 	if provider.lastScope.CachedEvidence {
-		t.Fatal("update must never act on cached association evidence")
+		t.Fatal("update must not depend on cached association evidence either")
+	}
+}
+
+func TestStatusAndCleanStillCollectEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func(*App) error
+	}{
+		{"status", func(a *App) error { return a.runStatus(context.Background()) }},
+		{"clean", func(a *App) error { return a.runClean(context.Background()) }},
+	} {
+		provider := &stubProvider{}
+		app := testApp(t, provider)
+		if err := tc.run(app); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if provider.lastScope.SkipEvidence {
+			t.Fatalf("%s needs association evidence (in_use counts / cleanup gate)", tc.name)
+		}
 	}
 }
 

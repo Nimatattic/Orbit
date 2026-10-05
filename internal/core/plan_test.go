@@ -143,3 +143,45 @@ func TestBuildUpdatePlanFiltersProducts(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanResolvesTheCurrentCertificateAgainstThePool(t *testing.T) {
+	now := time.Now()
+	certs, resources := planFixture(now)
+
+	plan := BuildUpdatePlan(resources, certs, PlanOptions{Account: "demo", Now: now, EdgeOneReplaceFreeCert: true})
+	var cdn *Change
+	for i := range plan.Changes {
+		if plan.Changes[i].Product == ProductCDN {
+			cdn = &plan.Changes[i]
+		}
+	}
+	if cdn == nil {
+		t.Fatal("expected a CDN row")
+	}
+	if cdn.From == nil {
+		t.Fatal("the current certificate must be reported")
+	}
+	// c-old is part of the pool, so its source and expiry come from the pool.
+	if cdn.From.Source != "upload" {
+		t.Fatalf("current certificate source = %q, want upload (resolved from the pool)", cdn.From.Source)
+	}
+	if !cdn.From.NotAfter.Equal(certs[0].NotAfter) {
+		t.Fatalf("current certificate expiry = %s, want %s", cdn.From.NotAfter, certs[0].NotAfter)
+	}
+}
+
+func TestPlanKeepsForeignCurrentCertificateUnresolved(t *testing.T) {
+	now := time.Now()
+	_, resources := planFixture(now)
+	certs := []Certificate{{
+		ID: "only", From: "upload", Domain: "other.example.com", SANs: []string{"other.example.com"},
+		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(100 * 24 * time.Hour), Status: 1, Deployable: true,
+	}}
+
+	plan := BuildUpdatePlan(resources, certs, PlanOptions{Account: "demo", Now: now})
+	for _, ch := range plan.Changes {
+		if ch.From != nil && ch.From.Source != "" {
+			t.Fatalf("an id outside the pool must stay unresolved, got %+v", ch.From)
+		}
+	}
+}

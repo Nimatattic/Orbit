@@ -20,8 +20,12 @@ type ScanScope struct {
 	Domains  []string
 	// CachedEvidence asks the provider to accept the cloud's short-lived
 	// association cache. `status` sets it (fast, up to 30 minutes old);
-	// `update` and `clean` must leave it false because they act on the data.
+	// `clean` must leave it false because it acts on the data.
 	CachedEvidence bool
+	// SkipEvidence omits the certificate<->resource association query. `update`
+	// sets it: planning only needs the certificate pool and the resources, and
+	// the query is the slowest step by far (a live run costs minutes).
+	SkipEvidence bool
 }
 
 // Progress is one human-readable scan event. The provider only emits message
