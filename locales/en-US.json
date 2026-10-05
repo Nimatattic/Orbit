@@ -172,5 +172,5 @@
   "scan.warning_compact": "scan warning: {product} — {code}{scope}",
   "cloud.check.identity": "credential identity (sts:GetCallerIdentity)",
   "flag.no_cache": "Ignore the cloud's association cache and query live (slower)",
-  "cloud.warn.zone_not_applicable": "this site type (EdgeOne Pages / AI / no-domain-access) is not managed through the certificate deployment APIs; the site was skipped"
+  "progress.teo.zone_skipped": "  site {zone} (type {type}) is not part of certificate deployment; skipped"
 }

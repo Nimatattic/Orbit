@@ -172,5 +172,5 @@
   "scan.warning_compact": "扫描告警：{product} — {code}{scope}",
   "cloud.check.identity": "凭证归属（sts:GetCallerIdentity）",
   "flag.no_cache": "忽略云端关联查询缓存，强制实时（较慢）",
-  "cloud.warn.zone_not_applicable": "该站点类型（EdgeOne Pages / AI / 无域名接入）不由证书部署接口管理，已跳过该站点"
+  "progress.teo.zone_skipped": "  站点 {zone}（类型 {type}）不参与证书部署，已跳过"
 }

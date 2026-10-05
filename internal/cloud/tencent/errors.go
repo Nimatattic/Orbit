@@ -33,7 +33,6 @@ const (
 	MsgAuthFailed         = "cloud.err.auth_failed"
 	MsgNoPermission       = "cloud.err.no_permission"
 	MsgEvidenceIncomplete = "cloud.err.evidence_incomplete"
-	MsgZoneNotApplicable  = "cloud.warn.zone_not_applicable"
 )
 
 // retryableCodes are cloud error codes worth retrying: transient limits and

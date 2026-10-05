@@ -188,7 +188,7 @@ M1 里最容易出错的一点：EdgeOne 域名的证书配置由 `Certificate.M
 
 | 现象 | 含义 |
 | --- | --- |
-| `account test` 里 teo **通过**，但 `status` 仍报 `teo — UnauthorizedOperation` | 说明 `teo:DescribeZones` 有权限，失败的是**后续的 `teo:DescribeAccelerationDomains`**。最常见原因是账号里存在 **EdgeOne Pages / AI / 无域名接入类型**的站点（站点名常形如 `default-pages-zone`），这类站点的域名不由证书部署接口管理。Orbit 现在会**逐站点容错**：跳过该站点、继续扫其它站点，并提示"该站点类型不由证书部署接口管理" |
+| `account test` 里 teo **通过**，但 `status` 仍报 `teo — UnauthorizedOperation` | 说明 `teo:DescribeZones` 有权限，失败在**后续的 `teo:DescribeAccelerationDomains`**。若失败站点是 **EdgeOne Pages / AI / 无域名接入类型**（名字常形如 `default-pages-zone`），这属于结构性不适用：Orbit 只在进度流里说明并跳过，**不再报错、也不阻断 `clean`**；若是 full/partial 站点，则是真正的权限问题，仍是阻断性告警 |
 | 「凭证归属」通过，但 teo 仍 `UnauthorizedOperation`（且站点类型是 full/partial） | 权限已给到该身份，但 **EdgeOne 服务本身未开通**（CDN/EdgeOne 需各自在控制台开通，EdgeOne 还要绑套餐）；或策略里没有覆盖该 action |
 | 「凭证归属」显示的是**另一个** UserId/AccountId | 权限授给了别的子账号；用 `orbit account add --alias main --force` 重新录入正确的密钥 |
 | 「凭证归属」本身 `AuthFailure` | 密钥无效，与权限无关，先重录密钥 |
@@ -228,14 +228,16 @@ M1 里最容易出错的一点：EdgeOne 域名的证书配置由 `Certificate.M
 | `--products=cdn` | 只扫 CDN，跳过 EdgeOne 与它的分页 |
 | `--json` | 结果走 stdout；进度仍走 stderr，互不干扰 |
 
-**告警分两类**（`--json` 的 `warnings[].blocking` 会标明）：
+**告警只在真的失败时出现**（`--json` 的 `warnings[].blocking` 标明是否阻断 `clean`）：
 
-| 类别 | 例子 | 是否阻断 `clean` |
+| 情况 | 表现 | 是否阻断 `clean` |
 | --- | --- | --- |
-| **阻断性**（证据不完整） | `UnauthorizedOperation`（站点类型是 full/partial）、网络错误、关联查询超时 | 是 |
-| **信息性**（结构性不适用） | `ZoneNotApplicable`：EdgeOne Pages / AI / 无域名接入类型的站点 | 否 |
+| 某产品整体不可用（如 `teo:DescribeZones` 无权限） | 一行告警（含产品与错误码） | 是 |
+| 某站点枚举被拒（站点类型是 full/partial） | 一行告警（含站点名） | 是 |
+| 关联查询超时 | 一行告警（证据不完整） | 是 |
+| **EdgeOne Pages / AI / 无域名接入类型的站点** | **不产生告警**，进度流里一行说明：`站点 default-pages-zone（类型 pages）不参与证书部署，已跳过` | 否 |
 
-信息性告警只打印一行说明，不附带云端原始错误（因为那不是错误，只是我们不该去碰它）。
+最后一行是关键：CDN 与 EdgeOne 是两条产品线，Pages 站点本来就不走证书部署这条路，所以不算异常、也不必每次扫描都提醒你。
 
 **缓存与实时的差异是正常的**：`status`（默认复用 30 分钟缓存）与 `status --no-cache`（实时）可能给出不同的 `in_use` 计数，例如同一账号下 10 vs 9——因为两张证书的绑定关系在这段时间里变化过。这正是 `update` / `clean` **永远使用实时数据**的原因：它们要据此写云端或删除证书。
 

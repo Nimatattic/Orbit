@@ -46,9 +46,11 @@ func (p *Provider) listZones(ctx context.Context) ([]*teo.Zone, error) {
 
 // listTEODomains enumerates every accelerated domain of every site.
 //
-// A site that refuses enumeration (for example an EdgeOne Pages site, whose
-// domains are not part of certificate deployment) must not take the whole
-// product down, so failures are collected per site and returned as warnings.
+// A site that refuses enumeration must not take the whole product down, so
+// failures are collected per site. EdgeOne Pages / AI / no-domain-access sites
+// are a different product surface: they are skipped with a progress note rather
+// than reported, because CDN and EdgeOne certificate deployment simply do not
+// apply to them.
 func (p *Provider) listTEODomains(ctx context.Context) ([]core.Resource, []cloud.ScanWarning, error) {
 	zones, err := p.listZones(ctx)
 	if err != nil {
@@ -72,7 +74,11 @@ func (p *Provider) listTEODomains(ctx context.Context) ([]core.Resource, []cloud
 
 		domains, err := p.listAccelerationDomains(ctx, str(zone.ZoneId))
 		if err != nil {
-			warnings = append(warnings, p.zoneWarning(name, str(zone.Type), err))
+			if zoneTypesWithoutDeployableDomains[str(zone.Type)] {
+				p.emit("progress.teo.zone_skipped", "zone", name, "type", str(zone.Type))
+				continue
+			}
+			warnings = append(warnings, p.warning("teo", "teo:DescribeAccelerationDomains", err).WithScope(name))
 			continue
 		}
 		out = append(out, domains...)
@@ -81,25 +87,12 @@ func (p *Provider) listTEODomains(ctx context.Context) ([]core.Resource, []cloud
 }
 
 // zoneTypesWithoutDeployableDomains are EdgeOne site types whose domains are not
-// managed through the certificate deployment APIs.
+// managed through the certificate deployment APIs. Skipping them is expected
+// behaviour, not a warning: they belong to a different product surface.
 var zoneTypesWithoutDeployableDomains = map[string]bool{
 	"pages":          true,
 	"ai":             true,
 	"noDomainAccess": true,
-}
-
-// zoneWarning explains a per-site enumeration failure.
-func (p *Provider) zoneWarning(zone, zoneType string, err error) cloud.ScanWarning {
-	w := p.warning("teo", "teo:DescribeAccelerationDomains", err)
-	w.Scope = zone
-	if zoneTypesWithoutDeployableDomains[zoneType] {
-		// Structurally out of scope: this site never participates in
-		// certificate deployment, so it does not make the evidence incomplete.
-		w.Code = "ZoneNotApplicable"
-		w.MessageKey = MsgZoneNotApplicable
-		w.Informational = true
-	}
-	return w
 }
 
 func (p *Provider) listAccelerationDomains(ctx context.Context, zoneID string) ([]core.Resource, error) {

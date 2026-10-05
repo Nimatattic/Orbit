@@ -93,6 +93,12 @@ type ScanResult struct {
 	Warnings     []ScanWarning
 }
 
+// WithScope returns a copy of the warning tagged with a narrower target.
+func (w ScanWarning) WithScope(scope string) ScanWarning {
+	w.Scope = scope
+	return w
+}
+
 // Complete reports whether the scan produced usable evidence, i.e. whether no
 // blocking warning was raised.
 func (r ScanResult) Complete() bool { return len(r.BlockingWarnings()) == 0 }
@@ -119,10 +125,11 @@ type ScanWarning struct {
 	MessageKey string // actionable hint
 	// Scope names the narrower target that failed, e.g. an EdgeOne site.
 	Scope string
-	// Informational marks a warning that does NOT make the evidence incomplete:
-	// the target is structurally out of scope (an EdgeOne Pages site is not
-	// certificate-deployable). The zero value is deliberately the strict one, so
-	// forgetting to set this keeps a warning blocking.
+	// Informational marks a warning that does NOT make the evidence incomplete,
+	// for targets a provider skips as structurally out of scope. The zero value
+	// is deliberately the strict one: forgetting to set this keeps a warning
+	// blocking. (EdgeOne Pages sites no longer produce a warning at all; they are
+	// reported through the progress stream instead.)
 	Informational bool
 	Err           error
 }

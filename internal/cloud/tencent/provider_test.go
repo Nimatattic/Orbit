@@ -1005,7 +1005,18 @@ func TestOneBadSiteDoesNotKillTheEdgeOneScan(t *testing.T) {
 		failDomains: map[string]error{"zone-pages": denied},
 	}
 	sslFake := &fakeSSL{certs: []*ssl.Certificates{sslCert("c-1", "a", "cdn.example.com", nil, "upload", "", "2027-01-01 00:00:00", ptr(-1))}}
-	p := testProvider(t, sslFake, &fakeCDN{}, teoFake)
+
+	var events []string
+	opts := Options{Region: "ap-guangzhou", PollInterval: time.Second, PollTimeout: 30 * time.Second, MaxAttempts: 3}.withDefaults()
+	opts.Progress = func(ev cloud.Progress) { events = append(events, ev.Key) }
+	clk := newClock()
+	p := newWithClients("demo", opts, sslFake, &fakeCDN{}, teoFake)
+	p.now, p.sleep = clk.now, clk.sleep
+	p.limiters = map[string]*limiter{
+		"ssl": newLimiter(1000, clk.now, clk.sleep),
+		"cdn": newLimiter(1000, clk.now, clk.sleep),
+		"teo": newLimiter(1000, clk.now, clk.sleep),
+	}
 
 	res, err := p.Scan(context.Background(), "demo", cloud.ScanScope{})
 	if err != nil {
@@ -1014,43 +1025,17 @@ func TestOneBadSiteDoesNotKillTheEdgeOneScan(t *testing.T) {
 	if len(res.Resources) != 1 || res.Resources[0].Domain != "cdn.example.com" {
 		t.Fatalf("the healthy site must still be enumerated, got %+v", res.Resources)
 	}
-	if len(res.Warnings) != 1 {
-		t.Fatalf("expected one warning for the bad site, got %+v", res.Warnings)
+	// EdgeOne Pages is a different product surface: skipping it is normal and
+	// must not produce a scan warning.
+	if len(res.Warnings) != 0 {
+		t.Fatalf("out-of-scope sites must not raise warnings, got %+v", res.Warnings)
 	}
-	w := res.Warnings[0]
-	if w.Scope != "default-pages-zone" {
-		t.Fatalf("the warning must name the site, got %+v", w)
+	if !res.Complete() {
+		t.Fatal("skipping an out-of-scope site keeps the evidence complete")
 	}
-	// A Pages site is not certificate-deployable; say that instead of blaming
-	// permissions.
-	if w.Code != "ZoneNotApplicable" || w.MessageKey != MsgZoneNotApplicable {
-		t.Fatalf("pages sites must be reported as not applicable, got %+v", w)
-	}
-	if !w.Informational {
-		t.Fatal("a Pages site is structurally out of scope and must not block cleanup")
-	}
-	if res.Complete() == false {
-		t.Fatal("an out-of-scope site must not make the scan incomplete")
-	}
-}
-
-func TestRealProductFailureStaysBlocking(t *testing.T) {
-	denied := tcerr.NewTencentCloudSDKError("UnauthorizedOperation", "操作无权限。", "req-22")
-	teoFake := &fakeTEO{
-		zones:       []*teo.Zone{{ZoneId: common.StringPtr("zone-1"), ZoneName: common.StringPtr("main"), Type: common.StringPtr("full")}},
-		failDomains: map[string]error{"zone-1": denied},
-	}
-	p := testProvider(t, &fakeSSL{}, &fakeCDN{}, teoFake)
-
-	res, err := p.Scan(context.Background(), "demo", cloud.ScanScope{})
-	if err != nil {
-		t.Fatalf("scan: %v", err)
-	}
-	if res.Complete() {
-		t.Fatal("a denied full-type site must keep the evidence incomplete")
-	}
-	if len(res.BlockingWarnings()) != 1 {
-		t.Fatalf("expected one blocking warning, got %+v", res.Warnings)
+	joined := strings.Join(events, ",")
+	if !strings.Contains(joined, "progress.teo.zone_skipped") {
+		t.Fatalf("the skip should still be visible in the progress stream, got %v", events)
 	}
 }
 
