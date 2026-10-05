@@ -239,6 +239,8 @@ This account has no permission for this product, or the product is not activated
 3. **该账号下确实没有该产品的资源**：部分接口在没有开通/没有资源时会返回 `UnauthorizedOperation` 而不是空列表。
 4. **确认调用的是哪个 appid**：多账号场景下 `--accounts=` 决定了用哪套密钥，`account test` 的输出会带上账号别名。
 
+> ⚠️ 注意：只要有一个产品扫描失败，`clean` 就会拒绝执行（证据不完整）。如果你的账号确实不使用某个产品（例如 EdgeOne 未开通），**要把它从范围里去掉**，否则每次 `clean` 都会被挡下：
+
 **临时绕过**：如果你暂时不使用某个产品，直接把它从范围里去掉即可（不会产生噪声，也不会影响清理安全性）：
 
 ```bash
@@ -251,7 +253,7 @@ This account has no permission for this product, or the product is not activated
 
 | 命令 | 行为 |
 | --- | --- |
-| `status` / `update --dry-run` | **不整体失败**：把失败的产品打印为 `scan warning`（含 API 名与错误码），继续用读到的数据出结果 |
+| `status` / `update --dry-run` | **不整体失败**：把失败的产品打印为一行紧凑告警 `扫描告警：<产品> — <错误码>`（例如 `teo — UnauthorizedOperation`），继续用读到的数据出结果。需要完整 API 名与 RequestId 时看 `--json` 的 `warnings` 字段 |
 | `update --yes` | 只对成功扫描到的产品执行写入；未扫到的产品不会被触碰 |
 | `clean` | **拒绝执行**（退出码 4），因为清理证据不完整；确认风险后可加 `--permit-partial-scan` 强制继续 |
 | 证书池本身取不到 | 直接失败——没有证书池无法做任何匹配 |

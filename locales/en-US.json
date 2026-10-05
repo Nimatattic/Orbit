@@ -168,5 +168,6 @@
   "flag.progress": "Force scan progress output (on by default in a terminal)",
   "flag.no_progress": "Disable scan progress output",
   "cloud.err.evidence_incomplete": "Some certificates' association queries did not finish in time (incomplete evidence): cleanup will skip them",
-  "progress.bindings.first_run": "  note: the live association query is an async cloud task and can take minutes on the first run (cap {timeout}); status reuses a 30-minute cache afterwards"
+  "progress.bindings.first_run": "  note: the live association query is an async cloud task and can take minutes on the first run (cap {timeout}); status reuses a 30-minute cache afterwards",
+  "scan.warning_compact": "scan warning: {product} — {code}"
 }

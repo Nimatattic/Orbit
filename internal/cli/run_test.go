@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -106,8 +107,11 @@ func TestCleanRefusesOnIncompleteScan(t *testing.T) {
 	if e.Code != exitcode.GateRefused || e.Key != "scan.refused" {
 		t.Fatalf("got code=%d key=%q, want %d/scan.refused", e.Code, e.Key, exitcode.GateRefused)
 	}
-	if !bytes.Contains(app.testErr.Bytes(), []byte("teo:DescribeZones")) {
-		t.Fatalf("the warning must be printed, got %q", app.testErr.String())
+	// Availability failures collapse to "product — code" (the action stays in
+	// the JSON warnings).
+	if !bytes.Contains(app.testErr.Bytes(), []byte("teo")) ||
+		!bytes.Contains(app.testErr.Bytes(), []byte("UnauthorizedOperation")) {
+		t.Fatalf("the warning must name the unavailable product, got %q", app.testErr.String())
 	}
 }
 
@@ -140,5 +144,42 @@ func TestCleanRefusesWhenEvidenceQueryIsMissing(t *testing.T) {
 	if bytes.Contains(app.testOut.Bytes(), []byte("c-old")) &&
 		bytes.Contains(app.testOut.Bytes(), []byte("候选删除")) {
 		t.Fatalf("a certificate without evidence must not be a candidate: %s", app.testOut.String())
+	}
+}
+
+func TestUnauthorizedProductWarnsCompactly(t *testing.T) {
+	app := testApp(t, &stubProvider{})
+	app.renderWarnings([]cloud.ScanWarning{{
+		Product: "teo", Action: "teo:DescribeZones + teo:DescribeAccelerationDomains",
+		Code: "UnauthorizedOperation", MessageKey: "cloud.err.no_permission",
+		Err: errors.New("[TencentCloudSDKError] Code=UnauthorizedOperation, Message=操作无权限。, RequestId=abc (action teo:DescribeZones, account main)"),
+	}})
+
+	got := app.testErr.String()
+	if !strings.Contains(got, "teo") || !strings.Contains(got, "UnauthorizedOperation") {
+		t.Fatalf("the warning must name the product and the code, got %q", got)
+	}
+	if strings.Contains(got, "TencentCloudSDKError") || strings.Contains(got, "RequestId") {
+		t.Fatalf("availability failures must not dump the raw cloud error, got %q", got)
+	}
+	if strings.Contains(got, "AdministratorAccess") {
+		t.Fatalf("availability failures must not print the generic permission hint, got %q", got)
+	}
+}
+
+func TestActionableWarningsKeepTheirDetail(t *testing.T) {
+	app := testApp(t, &stubProvider{})
+	app.renderWarnings([]cloud.ScanWarning{{
+		Product: "cdn", Action: "cdn:DescribeDomainsConfig",
+		Code: "ResourceUnavailable.CdnHostNoIcp", MessageKey: "cloud.err.no_icp",
+		Err: errors.New("[TencentCloudSDKError] Code=ResourceUnavailable.CdnHostNoIcp"),
+	}})
+
+	got := app.testErr.String()
+	if !strings.Contains(got, "cloud.err.no_icp") && !strings.Contains(got, "备案") {
+		t.Fatalf("actionable warnings keep their translated hint, got %q", got)
+	}
+	if !strings.Contains(got, "CdnHostNoIcp") {
+		t.Fatalf("actionable warnings keep their code, got %q", got)
 	}
 }

@@ -129,10 +129,31 @@ func (a *App) warningDTOs(warnings []cloud.ScanWarning) []warningDTO {
 	return out
 }
 
+// compactWarningCodes are per-product availability failures. Printing the SDK
+// stack and the generic permission hint for those is pure noise: the product is
+// simply not usable for this account, and nothing in the run will change that.
+var compactWarningCodes = map[string]bool{
+	"UnauthorizedOperation": true,
+}
+
+// isCompactWarning reports whether a warning should collapse to one short line.
+func isCompactWarning(w cloud.ScanWarning) bool {
+	if compactWarningCodes[w.Code] {
+		return true
+	}
+	// Variants such as UnauthorizedOperation.CamUnauthorized behave the same way.
+	return strings.HasPrefix(w.Code, "UnauthorizedOperation.")
+}
+
 // renderWarnings prints partial-scan warnings to stderr so that machine-readable
-// stdout stays clean.
+// stdout stays clean. Full detail (hint + raw cloud error) is reserved for
+// warnings that need action; availability failures collapse to "product — code".
 func (a *App) renderWarnings(warnings []cloud.ScanWarning) {
 	for _, w := range warnings {
+		if isCompactWarning(w) {
+			fmt.Fprintln(a.Err, a.Bundle.T("scan.warning_compact", "product", w.Product, "code", w.Code))
+			continue
+		}
 		hint := ""
 		if w.MessageKey != "" {
 			hint = a.Bundle.T(w.MessageKey)

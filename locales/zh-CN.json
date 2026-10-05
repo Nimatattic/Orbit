@@ -168,5 +168,6 @@
   "flag.progress": "强制输出扫描进度（默认在终端下自动开启）",
   "flag.no_progress": "关闭扫描进度输出",
   "cloud.err.evidence_incomplete": "部分证书的关联查询未在超时内完成（证据不完整）：清理会跳过这些证书",
-  "progress.bindings.first_run": "  注意：实时关联查询是云端异步任务，首次可能需要数分钟（上限 {timeout}）；status 之后会复用 30 分钟缓存"
+  "progress.bindings.first_run": "  注意：实时关联查询是云端异步任务，首次可能需要数分钟（上限 {timeout}）；status 之后会复用 30 分钟缓存",
+  "scan.warning_compact": "扫描告警：{product} — {code}"
 }
