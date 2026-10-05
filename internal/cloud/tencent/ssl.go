@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 	ssl "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl/v20191205"
@@ -40,6 +41,7 @@ func (p *Provider) fetchCertificates(ctx context.Context) ([]core.Certificate, e
 			out = append(out, toCertificate(item))
 		}
 		offset += uint64(len(resp.Response.Certificates))
+		p.emit("progress.page.certificates", "count", len(out), "total", int(u64(resp.Response.TotalCount)))
 		if len(resp.Response.Certificates) == 0 || offset >= u64(resp.Response.TotalCount) {
 			break
 		}
@@ -87,9 +89,17 @@ func toCertificate(item *ssl.Certificates) core.Certificate {
 
 // fetchBindings answers "which cloud resources use these certificates" using the
 // authoritative association task (decision T4).
+//
+// All batches are created first and then polled together: polling batches
+// serially would multiply the wait by the batch count (N x poll timeout), while
+// the cloud runs those tasks concurrently.
 func (p *Provider) fetchBindings(ctx context.Context, certIDs []string, useCache bool) (map[string]core.BindingEvidence, error) {
 	out := map[string]core.BindingEvidence{}
-	for _, chunk := range chunkStrings(certIDs, 100) {
+	chunks := chunkStrings(certIDs, 100)
+	taskToCert := map[string]string{}
+	taskIDs := make([]string, 0, len(certIDs))
+
+	for i, chunk := range chunks {
 		create := ssl.NewCreateCertificateBindResourceSyncTaskRequest()
 		create.CertificateIds = common.StringPtrs(chunk)
 		create.IsCache = common.Uint64Ptr(boolToUint64(useCache))
@@ -100,11 +110,10 @@ func (p *Provider) fetchBindings(ctx context.Context, certIDs []string, useCache
 		if err != nil {
 			return nil, err
 		}
+		p.emit("progress.batch.bindings", "batch", i+1, "batches", len(chunks), "count", len(chunk))
 		if created == nil || created.Response == nil {
 			continue
 		}
-		taskToCert := map[string]string{}
-		taskIDs := make([]string, 0, len(created.Response.CertTaskIds))
 		for _, t := range created.Response.CertTaskIds {
 			if t == nil {
 				continue
@@ -117,30 +126,38 @@ func (p *Provider) fetchBindings(ctx context.Context, certIDs []string, useCache
 			taskIDs = append(taskIDs, taskID)
 			out[certID] = core.BindingEvidence{CertID: certID, QueriedAt: p.now()}
 		}
-		if len(taskIDs) == 0 {
-			continue
-		}
-		if err := p.pollBindingTasks(ctx, taskIDs, taskToCert, out); err != nil {
-			return nil, err
-		}
+	}
+	if len(taskIDs) == 0 {
+		return out, nil
+	}
+	if err := p.pollBindingTasks(ctx, taskIDs, taskToCert, out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
 
+// pollBindingTasks polls every task (100 ids per request, as the API allows) in
+// one loop, so the total wait tracks the slowest task instead of the sum.
 func (p *Provider) pollBindingTasks(ctx context.Context, taskIDs []string, taskToCert map[string]string, out map[string]core.BindingEvidence) error {
-	deadline := p.now().Add(p.opts.PollTimeout)
-	for {
-		req := ssl.NewDescribeCertificateBindResourceTaskResultRequest()
-		req.TaskIds = common.StringPtrs(taskIDs)
+	batches := chunkStrings(taskIDs, 100)
+	start := p.now()
+	deadline := start.Add(p.opts.PollTimeout)
 
-		resp, err := call(ctx, p.limiters["ssl"], p.opts.MaxAttempts, func() (*ssl.DescribeCertificateBindResourceTaskResultResponse, error) {
-			return p.ssl.DescribeCertificateBindResourceTaskResult(req)
-		})
-		if err != nil {
-			return err
-		}
+	for {
 		pending := 0
-		if resp != nil && resp.Response != nil {
+		for _, batch := range batches {
+			req := ssl.NewDescribeCertificateBindResourceTaskResultRequest()
+			req.TaskIds = common.StringPtrs(batch)
+
+			resp, err := call(ctx, p.limiters["ssl"], p.opts.MaxAttempts, func() (*ssl.DescribeCertificateBindResourceTaskResultResponse, error) {
+				return p.ssl.DescribeCertificateBindResourceTaskResult(req)
+			})
+			if err != nil {
+				return err
+			}
+			if resp == nil || resp.Response == nil {
+				continue
+			}
 			for _, r := range resp.Response.SyncTaskBindResourceResult {
 				if r == nil {
 					continue
@@ -185,6 +202,9 @@ func (p *Provider) pollBindingTasks(ctx context.Context, taskIDs []string, taskT
 		if pending == 0 || !p.now().Before(deadline) {
 			return nil
 		}
+		p.emit("progress.wait.bindings",
+			"pending", pending,
+			"waited", p.now().Sub(start).Round(time.Second).String())
 		if err := p.sleep(ctx, p.opts.PollInterval); err != nil {
 			return err
 		}

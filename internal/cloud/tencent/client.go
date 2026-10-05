@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Crequency/orbit/internal/cloud"
 	cdn "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdn/v20180606"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/profile"
@@ -42,6 +43,8 @@ type Options struct {
 	PollInterval time.Duration
 	PollTimeout  time.Duration
 	MaxAttempts  int
+	// Progress receives scan events; nil disables reporting.
+	Progress func(cloud.Progress)
 }
 
 func (o Options) withDefaults() Options {

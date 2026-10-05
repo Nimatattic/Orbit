@@ -18,6 +18,19 @@ var ErrNotImplemented = errors.New("cloud: not implemented yet")
 type ScanScope struct {
 	Products []string
 	Domains  []string
+	// CachedEvidence asks the provider to accept the cloud's short-lived
+	// association cache. `status` sets it (fast, up to 30 minutes old);
+	// `update` and `clean` must leave it false because they act on the data.
+	CachedEvidence bool
+}
+
+// Progress is one human-readable scan event. The provider only emits message
+// keys and arguments; translation happens in the presentation layer.
+type Progress struct {
+	Key   string
+	Args  []any
+	Done  int
+	Total int
 }
 
 // ApplyOptions configures a write run.

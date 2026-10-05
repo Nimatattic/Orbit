@@ -49,11 +49,17 @@ func (p *Provider) listTEODomains(ctx context.Context) ([]core.Resource, error) 
 	if err != nil {
 		return nil, err
 	}
+	p.emit("progress.teo.zones_done", "count", len(zones))
 	var out []core.Resource
-	for _, zone := range zones {
+	for i, zone := range zones {
 		if zone == nil || str(zone.ZoneId) == "" {
 			continue
 		}
+		name := str(zone.ZoneName)
+		if name == "" {
+			name = str(zone.ZoneId)
+		}
+		p.emit("progress.teo.zone_domains", "index", i+1, "zones", len(zones), "zone", name)
 		domains, err := p.listAccelerationDomains(ctx, str(zone.ZoneId))
 		if err != nil {
 			return nil, err

@@ -162,12 +162,14 @@ func (p *Provider) Preflight(ctx context.Context, _ string) ([]core.Check, error
 func (p *Provider) Scan(ctx context.Context, _ string, scope cloud.ScanScope) (cloud.ScanResult, error) {
 	var res cloud.ScanResult
 
+	p.emit("progress.stage.certificates")
 	// The certificate pool is mandatory: without it nothing can be matched.
 	certs, err := p.fetchCertificates(ctx)
 	if err != nil {
 		return res, withAction(err, p.account, "ssl:DescribeCertificates")
 	}
 	res.Certificates = certs
+	p.emit("progress.stage.certificates_done", "count", len(certs))
 
 	want := map[string]bool{}
 	for _, name := range scope.Products {
@@ -176,7 +178,11 @@ func (p *Provider) Scan(ctx context.Context, _ string, scope cloud.ScanScope) (c
 	all := len(want) == 0
 
 	if all || want["cdn"] {
+		p.emit("progress.stage.cdn")
 		items, err := p.listCDNDomains(ctx)
+		if err == nil {
+			p.emit("progress.stage.cdn_done", "count", len(items))
+		}
 		if err != nil {
 			res.Warnings = append(res.Warnings, p.warning("cdn", "cdn:DescribeDomainsConfig", err))
 		} else {
@@ -184,7 +190,11 @@ func (p *Provider) Scan(ctx context.Context, _ string, scope cloud.ScanScope) (c
 		}
 	}
 	if all || want["teo"] {
+		p.emit("progress.stage.teo")
 		items, err := p.listTEODomains(ctx)
+		if err == nil {
+			p.emit("progress.stage.teo_done", "count", len(items))
+		}
 		if err != nil {
 			res.Warnings = append(res.Warnings, p.warning("teo", "teo:DescribeZones + teo:DescribeAccelerationDomains", err))
 		} else {
@@ -196,13 +206,52 @@ func (p *Provider) Scan(ctx context.Context, _ string, scope cloud.ScanScope) (c
 	for _, c := range certs {
 		ids = append(ids, c.ID)
 	}
-	evidence, err := p.fetchBindings(ctx, ids, false)
+	if len(ids) > 0 {
+		p.emit("progress.stage.bindings", "count", len(ids))
+		if !scope.CachedEvidence {
+			// Say this up front: the live association query is an async cloud
+			// task and routinely takes minutes on the first run.
+			p.emit("progress.bindings.first_run", "timeout", p.opts.PollTimeout.String())
+		}
+	}
+	evidence, err := p.fetchBindings(ctx, ids, scope.CachedEvidence)
 	if err != nil {
 		res.Warnings = append(res.Warnings, p.warning("ssl", "ssl:CreateCertificateBindResourceSyncTask + DescribeCertificateBindResourceTaskResult", err))
 	} else {
 		res.Evidence = evidence
+		p.emit("progress.stage.bindings_done", "count", len(evidence))
+		// An unfinished query is not an error, but it is incomplete evidence:
+		// surface it instead of silently reporting zero references.
+		if pending := countUnfinished(evidence); pending > 0 {
+			res.Warnings = append(res.Warnings, cloud.ScanWarning{
+				Product:    "ssl",
+				Action:     "ssl:DescribeCertificateBindResourceTaskResult",
+				Code:       "EvidenceIncomplete",
+				MessageKey: MsgEvidenceIncomplete,
+				Err:        fmt.Errorf("%d certificate(s) were still being queried after %s", pending, p.opts.PollTimeout),
+			})
+		}
 	}
 	return res, nil
+}
+
+// countUnfinished reports how many association queries never reached status 1.
+func countUnfinished(evidence map[string]core.BindingEvidence) int {
+	n := 0
+	for _, ev := range evidence {
+		if ev.Status != 1 {
+			n++
+		}
+	}
+	return n
+}
+
+// emit forwards a progress event when reporting is enabled.
+func (p *Provider) emit(key string, kv ...any) {
+	if p.opts.Progress == nil {
+		return
+	}
+	p.opts.Progress(cloud.Progress{Key: key, Args: kv})
 }
 
 func (p *Provider) warning(product, action string, err error) cloud.ScanWarning {

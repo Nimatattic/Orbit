@@ -841,3 +841,93 @@ func TestPreflightReportsEachProductSeparately(t *testing.T) {
 		t.Fatalf("the service role cannot be probed read-only: %+v", status)
 	}
 }
+
+// ------------------------------------------------------------------ progress
+
+func TestScanEmitsProgressEvents(t *testing.T) {
+	sslFake := &fakeSSL{
+		certs: []*ssl.Certificates{sslCert("c-1", "a", "www.example.com", nil, "upload", "", "2027-01-01 00:00:00", ptr(-1))},
+		bindCreateResponse: &ssl.CreateCertificateBindResourceSyncTaskResponse{
+			Response: &ssl.CreateCertificateBindResourceSyncTaskResponseParams{
+				CertTaskIds: []*ssl.CertTaskId{{CertId: common.StringPtr("c-1"), TaskId: common.StringPtr("t-1")}},
+			},
+		},
+		bindPollResponses: []*ssl.DescribeCertificateBindResourceTaskResultResponse{{
+			Response: &ssl.DescribeCertificateBindResourceTaskResultResponseParams{
+				SyncTaskBindResourceResult: []*ssl.SyncTaskBindResourceResult{
+					{TaskId: common.StringPtr("t-1"), Status: common.Uint64Ptr(1)},
+				},
+			},
+		}},
+	}
+	cdnFake := &fakeCDN{domains: []*cdn.DetailDomain{{Domain: common.StringPtr("www.example.com"), Status: common.StringPtr("online")}}}
+	teoFake := &fakeTEO{zones: []*teo.Zone{{ZoneId: common.StringPtr("zone-1"), ZoneName: common.StringPtr("example.com")}}}
+
+	opts := Options{Region: "ap-guangzhou", PollInterval: time.Second, PollTimeout: 30 * time.Second, MaxAttempts: 3}.withDefaults()
+	clk := newClock()
+	var keys []string
+	opts.Progress = func(ev cloud.Progress) { keys = append(keys, ev.Key) }
+	p := newWithClients("demo", opts, sslFake, cdnFake, teoFake)
+	p.now, p.sleep = clk.now, clk.sleep
+	p.limiters = map[string]*limiter{
+		"ssl": newLimiter(1000, clk.now, clk.sleep),
+		"cdn": newLimiter(1000, clk.now, clk.sleep),
+		"teo": newLimiter(1000, clk.now, clk.sleep),
+	}
+
+	if _, err := p.Scan(context.Background(), "demo", cloud.ScanScope{}); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	joined := strings.Join(keys, ",")
+	for _, want := range []string{
+		"progress.stage.certificates",
+		"progress.stage.certificates_done",
+		"progress.stage.cdn",
+		"progress.stage.teo",
+		"progress.teo.zone_domains",
+		"progress.stage.bindings",
+		"progress.bindings.first_run",
+		"progress.stage.bindings_done",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing progress event %q in %v", want, keys)
+		}
+	}
+}
+
+func TestUnfinishedAssociationQueryBecomesAWarning(t *testing.T) {
+	sslFake := &fakeSSL{
+		certs: []*ssl.Certificates{sslCert("c-1", "a", "www.example.com", nil, "upload", "", "2027-01-01 00:00:00", ptr(-1))},
+		bindCreateResponse: &ssl.CreateCertificateBindResourceSyncTaskResponse{
+			Response: &ssl.CreateCertificateBindResourceSyncTaskResponseParams{
+				CertTaskIds: []*ssl.CertTaskId{{CertId: common.StringPtr("c-1"), TaskId: common.StringPtr("t-1")}},
+			},
+		},
+		// The task never leaves status 0 (querying); the poll deadline expires.
+		bindPollResponses: []*ssl.DescribeCertificateBindResourceTaskResultResponse{{
+			Response: &ssl.DescribeCertificateBindResourceTaskResultResponseParams{
+				SyncTaskBindResourceResult: []*ssl.SyncTaskBindResourceResult{
+					{TaskId: common.StringPtr("t-1"), Status: common.Uint64Ptr(0)},
+				},
+			},
+		}},
+	}
+	p := testProvider(t, sslFake, &fakeCDN{}, &fakeTEO{})
+
+	res, err := p.Scan(context.Background(), "demo", cloud.ScanScope{CachedEvidence: true})
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if res.Complete() {
+		t.Fatal("an unfinished association query must make the scan incomplete")
+	}
+	found := false
+	for _, w := range res.Warnings {
+		if w.MessageKey == MsgEvidenceIncomplete {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected an incomplete-evidence warning, got %+v", res.Warnings)
+	}
+}

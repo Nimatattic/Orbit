@@ -13,6 +13,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -42,6 +43,8 @@ type App struct {
 	NoTUI      bool
 	Demo       bool
 	JSON       bool
+	Progress   bool
+	NoProgress bool
 
 	// Command flags shared by update/clean/status.
 	Accounts    string
@@ -69,8 +72,10 @@ type App struct {
 	// configuration and credentials.
 	providerFactory func(alias string) (cloud.Provider, error)
 	// testOut/testErr keep the concrete buffers in tests only.
-	testOut     *bytes.Buffer
-	testErr     *bytes.Buffer
+	testOut *bytes.Buffer
+	testErr *bytes.Buffer
+	// progressFn renders scan progress; nil when progress is disabled.
+	progressFn  func(cloud.Progress)
 	WorkDir     string
 	Home        string
 	Interactive bool
@@ -170,7 +175,9 @@ func (a *App) providerFor(alias string) (cloud.Provider, error) {
 		return a.providerFactory(alias)
 	}
 	if a.Demo {
-		return fake.NewDemo(), nil
+		provider := fake.NewDemo()
+		provider.SetProgress(a.ensureProgress())
+		return provider, nil
 	}
 	acc, ok := a.accountConfig(alias)
 	if !ok {
@@ -184,7 +191,11 @@ func (a *App) providerFor(alias string) (cloud.Provider, error) {
 	if err != nil {
 		return nil, exitcode.Wrap(err, exitcode.Fatal, "err.account_not_found", "alias", alias)
 	}
-	provider, err := tencent.New(alias, tencent.Options{SecretID: secret.SecretID, SecretKey: secret.SecretKey})
+	provider, err := tencent.New(alias, tencent.Options{
+		SecretID:  secret.SecretID,
+		SecretKey: secret.SecretKey,
+		Progress:  a.ensureProgress(),
+	})
 	if err != nil {
 		return nil, exitcode.Wrap(err, exitcode.Fatal, "err.provider_unimplemented",
 			"platform", DefaultPlatform)
@@ -255,6 +266,35 @@ func (a *App) accountConfig(alias string) (config.Account, bool) {
 		}
 	}
 	return config.Account{}, false
+}
+
+// ensureProgress lazily builds the progress sink. Progress goes to stderr so
+// that JSON output on stdout stays machine-readable. It defaults to on when
+// stderr is a terminal (a scan can take minutes on the first run), and can be
+// forced with --progress or silenced with --no-progress.
+func (a *App) ensureProgress() func(cloud.Progress) {
+	if a.progressFn != nil {
+		return a.progressFn
+	}
+	if !a.Progress && (a.NoProgress || !tty.IsTerminal(os.Stderr)) {
+		return nil
+	}
+	start := time.Now()
+	a.progressFn = func(ev cloud.Progress) {
+		bundle := a.Bundle
+		if bundle == nil {
+			return
+		}
+		fmt.Fprintf(a.Err, "[%6.1fs] %s\n", time.Since(start).Seconds(), bundle.T(ev.Key, ev.Args...))
+	}
+	return a.progressFn
+}
+
+// report emits one progress event when reporting is enabled.
+func (a *App) report(key string, kv ...any) {
+	if fn := a.ensureProgress(); fn != nil {
+		fn(cloud.Progress{Key: key, Args: kv})
+	}
 }
 
 // mapProviderErr turns provider sentinels into actionable CLI errors: a cloud
@@ -361,6 +401,8 @@ func (a *App) newRootCmd() *cobra.Command {
 	pf.BoolVar(&a.NoTUI, "no-tui", false, "")
 	pf.BoolVar(&a.Demo, "demo", false, "")
 	pf.BoolVar(&a.JSON, "json", false, "")
+	pf.BoolVar(&a.Progress, "progress", false, "")
+	pf.BoolVar(&a.NoProgress, "no-progress", false, "")
 
 	root.AddCommand(
 		a.newStatusCmd(),

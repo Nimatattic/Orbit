@@ -87,14 +87,16 @@ type planInputs struct {
 	warnings  []cloud.ScanWarning
 }
 
-func (a *App) collect(ctx context.Context, provider cloud.Provider, account string) (*planInputs, error) {
+func (a *App) collect(ctx context.Context, provider cloud.Provider, account string, cachedEvidence bool) (*planInputs, error) {
 	products, err := a.products(account)
 	if err != nil {
 		return nil, err
 	}
+	a.report("progress.header", "account", account, "products", strings.Join(products, ","))
 	scan, err := provider.Scan(ctx, account, cloud.ScanScope{
-		Products: products,
-		Domains:  splitList(a.Domains),
+		Products:       products,
+		Domains:        splitList(a.Domains),
+		CachedEvidence: cachedEvidence,
 	})
 	if err != nil {
 		return nil, a.mapProviderErr(err, provider.Name())
@@ -182,11 +184,12 @@ func (a *App) runUpdate(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		inputs, err := a.collect(ctx, provider, account)
+		inputs, err := a.collect(ctx, provider, account, false)
 		if err != nil {
 			return err
 		}
 		a.renderWarnings(inputs.warnings)
+		a.report("progress.plan")
 		opts, err := a.updateOptions(account)
 		if err != nil {
 			return err
@@ -261,11 +264,12 @@ func (a *App) runClean(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		inputs, err := a.collect(ctx, provider, account)
+		inputs, err := a.collect(ctx, provider, account, false)
 		if err != nil {
 			return err
 		}
 		a.renderWarnings(inputs.warnings)
+		a.report("progress.plan")
 		if len(inputs.warnings) > 0 && requireEvidence && !a.PartialScan {
 			// Gate G2: cleanup on a partial scan could delete a certificate that
 			// a product we failed to read is still using.
@@ -393,11 +397,13 @@ func (a *App) runStatus(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		inputs, err := a.collect(ctx, provider, account)
+		// status may reuse the cloud's short-lived association cache.
+		inputs, err := a.collect(ctx, provider, account, true)
 		if err != nil {
 			return err
 		}
 		a.renderWarnings(inputs.warnings)
+		a.report("progress.plan")
 		opts, err := a.updateOptions(account)
 		if err != nil {
 			return err

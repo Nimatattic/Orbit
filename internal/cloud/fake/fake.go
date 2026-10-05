@@ -13,6 +13,8 @@ import (
 
 // Provider is an in-memory Provider.
 type Provider struct {
+	// progress receives scan events; set by SetProgress.
+	progress  func(cloud.Progress)
 	Account   string
 	certs     []core.Certificate
 	resources []core.Resource
@@ -100,6 +102,15 @@ func NewDemo() *Provider {
 	return &Provider{Account: "demo", certs: certs, resources: resources, evidence: evidence}
 }
 
+// SetProgress installs the progress sink (used by --demo).
+func (p *Provider) SetProgress(fn func(cloud.Progress)) { p.progress = fn }
+
+func (p *Provider) emit(key string, kv ...any) {
+	if p.progress != nil {
+		p.progress(cloud.Progress{Key: key, Args: kv})
+	}
+}
+
 // Name implements cloud.Provider.
 func (p *Provider) Name() string { return "tencent" }
 
@@ -130,22 +141,40 @@ func (p *Provider) Preflight(_ context.Context, _ string) ([]core.Check, error) 
 
 // Scan implements cloud.Provider by delegating to the in-memory lists.
 func (p *Provider) Scan(ctx context.Context, account string, scope cloud.ScanScope) (cloud.ScanResult, error) {
+	p.emit("progress.stage.certificates")
 	certs, err := p.ListCertificates(ctx, account, scope)
 	if err != nil {
 		return cloud.ScanResult{}, err
 	}
+	p.emit("progress.stage.certificates_done", "count", len(certs))
+	p.emit("progress.stage.cdn")
 	resources, err := p.ListResources(ctx, account, scope)
 	if err != nil {
 		return cloud.ScanResult{}, err
 	}
+	cdnCount, teoCount := 0, 0
+	for _, res := range resources {
+		if res.Product == core.ProductCDN {
+			cdnCount++
+		} else {
+			teoCount++
+		}
+	}
+	p.emit("progress.stage.cdn_done", "count", cdnCount)
+	p.emit("progress.stage.teo")
+	p.emit("progress.teo.zones_done", "count", 1)
+	p.emit("progress.teo.zone_domains", "index", 1, "zones", 1, "zone", "zone-1 (demo)")
+	p.emit("progress.stage.teo_done", "count", teoCount)
 	ids := make([]string, 0, len(certs))
 	for _, c := range certs {
 		ids = append(ids, c.ID)
 	}
+	p.emit("progress.stage.bindings", "count", len(ids))
 	evidence, err := p.ListBindings(ctx, account, ids)
 	if err != nil {
 		return cloud.ScanResult{}, err
 	}
+	p.emit("progress.stage.bindings_done", "count", len(evidence))
 	return cloud.ScanResult{Certificates: certs, Resources: resources, Evidence: evidence}, nil
 }
 
