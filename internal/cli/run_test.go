@@ -240,3 +240,23 @@ func TestAccountTestProductFilterKeepsIdentityAndRole(t *testing.T) {
 		}
 	}
 }
+
+func TestCompactWarningsCarryTheScopeAndCollapseRepeats(t *testing.T) {
+	app := testApp(t, &stubProvider{})
+	denied := errors.New("[TencentCloudSDKError] Code=UnauthorizedOperation, Message=操作无权限。")
+	app.renderWarnings([]cloud.ScanWarning{
+		{Product: "teo", Action: "teo:DescribeAccelerationDomains", Code: "UnauthorizedOperation", Scope: "zone-a", Err: denied},
+		{Product: "teo", Action: "teo:DescribeAccelerationDomains", Code: "UnauthorizedOperation", Scope: "zone-a", Err: denied},
+	})
+
+	got := app.testErr.String()
+	if !strings.Contains(got, "zone-a") {
+		t.Fatalf("the failing site must be named, got %q", got)
+	}
+	if !strings.Contains(got, "×2") {
+		t.Fatalf("repeated failures must collapse into one counted line, got %q", got)
+	}
+	if strings.Count(got, "UnauthorizedOperation") != 1 {
+		t.Fatalf("expected a single collapsed line, got %q", got)
+	}
+}

@@ -169,7 +169,8 @@
   "flag.no_progress": "关闭扫描进度输出",
   "cloud.err.evidence_incomplete": "部分证书的关联查询未在超时内完成（证据不完整）：清理会跳过这些证书",
   "progress.bindings.first_run": "  注意：实时关联查询是云端异步任务，首次可能需要数分钟（上限 {timeout}）；status 之后会复用 30 分钟缓存",
-  "scan.warning_compact": "扫描告警：{product} — {code}",
+  "scan.warning_compact": "扫描告警：{product} — {code}{scope}",
   "cloud.check.identity": "凭证归属（sts:GetCallerIdentity）",
-  "flag.no_cache": "忽略云端关联查询缓存，强制实时（较慢）"
+  "flag.no_cache": "忽略云端关联查询缓存，强制实时（较慢）",
+  "cloud.warn.zone_not_applicable": "该站点类型（EdgeOne Pages / AI / 无域名接入）不由证书部署接口管理，已跳过该站点"
 }

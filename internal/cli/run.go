@@ -149,9 +149,44 @@ func isCompactWarning(w cloud.ScanWarning) bool {
 // stdout stays clean. Full detail (hint + raw cloud error) is reserved for
 // warnings that need action; availability failures collapse to "product — code".
 func (a *App) renderWarnings(warnings []cloud.ScanWarning) {
+	// The same availability failure can repeat once per site; collapse those
+	// into a single line with a count so the output stays readable.
+	counts := map[string]int{}
+	order := make([]string, 0, len(warnings))
+	merged := make([]cloud.ScanWarning, 0, len(warnings))
 	for _, w := range warnings {
+		if !isCompactWarning(w) {
+			merged = append(merged, w)
+			continue
+		}
+		sig := w.Product + "|" + w.Code + "|" + w.Scope
+		if _, seen := counts[sig]; !seen {
+			order = append(order, sig)
+			merged = append(merged, w)
+		}
+		counts[sig]++
+	}
+
+	repeats := map[string]int{}
+	for _, w := range merged {
+		if !isCompactWarning(w) {
+			continue
+		}
+		sig := w.Product + "|" + w.Code + "|" + w.Scope
+		repeats[sig] = counts[sig]
+	}
+
+	for _, w := range merged {
 		if isCompactWarning(w) {
-			fmt.Fprintln(a.Err, a.Bundle.T("scan.warning_compact", "product", w.Product, "code", w.Code))
+			scope := ""
+			if w.Scope != "" {
+				scope = " (" + w.Scope + ")"
+			}
+			line := a.Bundle.T("scan.warning_compact", "product", w.Product, "code", w.Code, "scope", scope)
+			if n := repeats[w.Product+"|"+w.Code+"|"+w.Scope]; n > 1 {
+				line += fmt.Sprintf(" ×%d", n)
+			}
+			fmt.Fprintln(a.Err, line)
 			continue
 		}
 		hint := ""

@@ -101,7 +101,9 @@ type ScanWarning struct {
 	Action     string // e.g. cdn:DescribeDomainsConfig
 	Code       string // cloud error code, empty for network errors
 	MessageKey string // actionable hint
-	Err        error
+	// Scope names the narrower target that failed, e.g. an EdgeOne site.
+	Scope string
+	Err   error
 }
 
 // Provider is the single seam between the engine and a cloud vendor.

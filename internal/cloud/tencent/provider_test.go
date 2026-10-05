@@ -253,6 +253,8 @@ type fakeTEO struct {
 	domains    map[string][]*teo.AccelerationDomain
 	modifyReqs []*teo.ModifyHostsCertificateRequest
 	failZones  error
+	// failDomains makes DescribeAccelerationDomains fail for specific sites.
+	failDomains map[string]error
 }
 
 func (f *fakeTEO) DescribeZones(*teo.DescribeZonesRequest) (*teo.DescribeZonesResponse, error) {
@@ -266,6 +268,9 @@ func (f *fakeTEO) DescribeZones(*teo.DescribeZonesRequest) (*teo.DescribeZonesRe
 }
 
 func (f *fakeTEO) DescribeAccelerationDomains(req *teo.DescribeAccelerationDomainsRequest) (*teo.DescribeAccelerationDomainsResponse, error) {
+	if err, ok := f.failDomains[str(req.ZoneId)]; ok {
+		return nil, err
+	}
 	all := f.domains[str(req.ZoneId)]
 	want := ""
 	if len(req.Filters) > 0 && req.Filters[0] != nil && len(req.Filters[0].Values) > 0 {
@@ -984,5 +989,61 @@ func TestUnfinishedAssociationQueryBecomesAWarning(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected an incomplete-evidence warning, got %+v", res.Warnings)
+	}
+}
+
+func TestOneBadSiteDoesNotKillTheEdgeOneScan(t *testing.T) {
+	denied := tcerr.NewTencentCloudSDKError("UnauthorizedOperation", "操作无权限。", "req-20")
+	teoFake := &fakeTEO{
+		zones: []*teo.Zone{
+			{ZoneId: common.StringPtr("zone-pages"), ZoneName: common.StringPtr("default-pages-zone"), Type: common.StringPtr("pages")},
+			{ZoneId: common.StringPtr("zone-main"), ZoneName: common.StringPtr("example.com"), Type: common.StringPtr("full")},
+		},
+		domains: map[string][]*teo.AccelerationDomain{
+			"zone-main": {{ZoneId: common.StringPtr("zone-main"), DomainName: common.StringPtr("cdn.example.com"), DomainStatus: common.StringPtr("online")}},
+		},
+		failDomains: map[string]error{"zone-pages": denied},
+	}
+	sslFake := &fakeSSL{certs: []*ssl.Certificates{sslCert("c-1", "a", "cdn.example.com", nil, "upload", "", "2027-01-01 00:00:00", ptr(-1))}}
+	p := testProvider(t, sslFake, &fakeCDN{}, teoFake)
+
+	res, err := p.Scan(context.Background(), "demo", cloud.ScanScope{})
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(res.Resources) != 1 || res.Resources[0].Domain != "cdn.example.com" {
+		t.Fatalf("the healthy site must still be enumerated, got %+v", res.Resources)
+	}
+	if len(res.Warnings) != 1 {
+		t.Fatalf("expected one warning for the bad site, got %+v", res.Warnings)
+	}
+	w := res.Warnings[0]
+	if w.Scope != "default-pages-zone" {
+		t.Fatalf("the warning must name the site, got %+v", w)
+	}
+	// A Pages site is not certificate-deployable; say that instead of blaming
+	// permissions.
+	if w.Code != "ZoneNotApplicable" || w.MessageKey != MsgZoneNotApplicable {
+		t.Fatalf("pages sites must be reported as not applicable, got %+v", w)
+	}
+}
+
+func TestUnknownSiteTypeKeepsThePermissionCode(t *testing.T) {
+	denied := tcerr.NewTencentCloudSDKError("UnauthorizedOperation", "操作无权限。", "req-21")
+	teoFake := &fakeTEO{
+		zones:       []*teo.Zone{{ZoneId: common.StringPtr("zone-1"), ZoneName: common.StringPtr("main"), Type: common.StringPtr("full")}},
+		failDomains: map[string]error{"zone-1": denied},
+	}
+	p := testProvider(t, &fakeSSL{}, &fakeCDN{}, teoFake)
+
+	res, err := p.Scan(context.Background(), "demo", cloud.ScanScope{})
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(res.Warnings) != 1 {
+		t.Fatalf("expected one warning, got %+v", res.Warnings)
+	}
+	if got := res.Warnings[0].Code; got != "UnauthorizedOperation" {
+		t.Fatalf("a full-type site failure keeps its real code, got %q", got)
 	}
 }

@@ -188,7 +188,8 @@ M1 里最容易出错的一点：EdgeOne 域名的证书配置由 `Certificate.M
 
 | 现象 | 含义 |
 | --- | --- |
-| 「凭证归属」通过，但 teo 仍 `UnauthorizedOperation` | 权限已给到该身份，但 **EdgeOne 服务本身未开通**（CDN/EdgeOne 需各自在控制台开通，EdgeOne 还要绑套餐）；或策略里没有覆盖 `teo:DescribeZones` 这个具体 action |
+| `account test` 里 teo **通过**，但 `status` 仍报 `teo — UnauthorizedOperation` | 说明 `teo:DescribeZones` 有权限，失败的是**后续的 `teo:DescribeAccelerationDomains`**。最常见原因是账号里存在 **EdgeOne Pages / AI / 无域名接入类型**的站点（站点名常形如 `default-pages-zone`），这类站点的域名不由证书部署接口管理。Orbit 现在会**逐站点容错**：跳过该站点、继续扫其它站点，并提示"该站点类型不由证书部署接口管理" |
+| 「凭证归属」通过，但 teo 仍 `UnauthorizedOperation`（且站点类型是 full/partial） | 权限已给到该身份，但 **EdgeOne 服务本身未开通**（CDN/EdgeOne 需各自在控制台开通，EdgeOne 还要绑套餐）；或策略里没有覆盖该 action |
 | 「凭证归属」显示的是**另一个** UserId/AccountId | 权限授给了别的子账号；用 `orbit account add --alias main --force` 重新录入正确的密钥 |
 | 「凭证归属」本身 `AuthFailure` | 密钥无效，与权限无关，先重录密钥 |
 | 所有产品都通过，只有 teo 失败 | 与密钥无关，是 EdgeOne 侧的开通/策略问题 |
@@ -226,6 +227,8 @@ M1 里最容易出错的一点：EdgeOne 域名的证书配置由 `Certificate.M
 | `--no-progress` | 关闭（cron 日志更干净） |
 | `--products=cdn` | 只扫 CDN，跳过 EdgeOne 与它的分页 |
 | `--json` | 结果走 stdout；进度仍走 stderr，互不干扰 |
+
+**缓存与实时的差异是正常的**：`status`（默认复用 30 分钟缓存）与 `status --no-cache`（实时）可能给出不同的 `in_use` 计数，例如同一账号下 10 vs 9——因为两张证书的绑定关系在这段时间里变化过。这正是 `update` / `clean` **永远使用实时数据**的原因：它们要据此写云端或删除证书。
 
 **为什么第一次慢**：`证书 → 云资源` 的关联关系不是一个同步接口，而是"创建异步任务 → 轮询结果"（云端自己也要遍历各产品的绑定关系）。规律是：
 
@@ -281,7 +284,7 @@ This account has no permission for this product, or the product is not activated
 
 | 命令 | 行为 |
 | --- | --- |
-| `status` / `update --dry-run` | **不整体失败**：把失败的产品打印为一行紧凑告警 `扫描告警：<产品> — <错误码>`（例如 `teo — UnauthorizedOperation`），继续用读到的数据出结果。需要完整 API 名与 RequestId 时看 `--json` 的 `warnings` 字段 |
+| `status` / `update --dry-run` | **不整体失败**：把失败的产品或站点打印为一行紧凑告警 `扫描告警：<产品> — <错误码>（<站点>）`（例如 `teo — UnauthorizedOperation (default-pages-zone)`，重复的会折叠成 `×N`），继续用读到的数据出结果。需要完整 API 名与 RequestId 时看 `--json` 的 `warnings` 字段 |
 | `update --yes` | 只对成功扫描到的产品执行写入；未扫到的产品不会被触碰 |
 | `clean` | **拒绝执行**（退出码 4），因为清理证据不完整；确认风险后可加 `--permit-partial-scan` 强制继续 |
 | 证书池本身取不到 | 直接失败——没有证书池无法做任何匹配 |

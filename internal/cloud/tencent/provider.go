@@ -229,14 +229,13 @@ func (p *Provider) Scan(ctx context.Context, _ string, scope cloud.ScanScope) (c
 	}
 	if all || want["teo"] {
 		p.emit("progress.stage.teo")
-		items, err := p.listTEODomains(ctx)
-		if err == nil {
-			p.emit("progress.stage.teo_done", "count", len(items))
-		}
+		items, warnings, err := p.listTEODomains(ctx)
 		if err != nil {
-			res.Warnings = append(res.Warnings, p.warning("teo", "teo:DescribeZones + teo:DescribeAccelerationDomains", err))
+			res.Warnings = append(res.Warnings, p.warning("teo", "teo:DescribeZones", err))
 		} else {
 			res.Resources = append(res.Resources, items...)
+			res.Warnings = append(res.Warnings, warnings...)
+			p.emit("progress.stage.teo_done", "count", len(items))
 		}
 	}
 
@@ -330,7 +329,7 @@ func (p *Provider) ListResources(ctx context.Context, _ string, scope cloud.Scan
 		out = append(out, cdnResources...)
 	}
 	if all || want["teo"] {
-		teoResources, err := p.listTEODomains(ctx)
+		teoResources, _, err := p.listTEODomains(ctx)
 		if err != nil {
 			return nil, err
 		}

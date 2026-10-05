@@ -7,6 +7,7 @@ import (
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 	teo "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/teo/v20220901"
 
+	"github.com/Crequency/orbit/internal/cloud"
 	"github.com/Crequency/orbit/internal/core"
 )
 
@@ -44,13 +45,21 @@ func (p *Provider) listZones(ctx context.Context) ([]*teo.Zone, error) {
 }
 
 // listTEODomains enumerates every accelerated domain of every site.
-func (p *Provider) listTEODomains(ctx context.Context) ([]core.Resource, error) {
+//
+// A site that refuses enumeration (for example an EdgeOne Pages site, whose
+// domains are not part of certificate deployment) must not take the whole
+// product down, so failures are collected per site and returned as warnings.
+func (p *Provider) listTEODomains(ctx context.Context) ([]core.Resource, []cloud.ScanWarning, error) {
 	zones, err := p.listZones(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	p.emit("progress.teo.zones_done", "count", len(zones))
-	var out []core.Resource
+
+	var (
+		out      []core.Resource
+		warnings []cloud.ScanWarning
+	)
 	for i, zone := range zones {
 		if zone == nil || str(zone.ZoneId) == "" {
 			continue
@@ -60,13 +69,34 @@ func (p *Provider) listTEODomains(ctx context.Context) ([]core.Resource, error) 
 			name = str(zone.ZoneId)
 		}
 		p.emit("progress.teo.zone_domains", "index", i+1, "zones", len(zones), "zone", name)
+
 		domains, err := p.listAccelerationDomains(ctx, str(zone.ZoneId))
 		if err != nil {
-			return nil, err
+			warnings = append(warnings, p.zoneWarning(name, str(zone.Type), err))
+			continue
 		}
 		out = append(out, domains...)
 	}
-	return out, nil
+	return out, warnings, nil
+}
+
+// zoneTypesWithoutDeployableDomains are EdgeOne site types whose domains are not
+// managed through the certificate deployment APIs.
+var zoneTypesWithoutDeployableDomains = map[string]bool{
+	"pages":          true,
+	"ai":             true,
+	"noDomainAccess": true,
+}
+
+// zoneWarning explains a per-site enumeration failure.
+func (p *Provider) zoneWarning(zone, zoneType string, err error) cloud.ScanWarning {
+	w := p.warning("teo", "teo:DescribeAccelerationDomains", err)
+	w.Scope = zone
+	if zoneTypesWithoutDeployableDomains[zoneType] {
+		w.Code = "ZoneNotApplicable"
+		w.MessageKey = MsgZoneNotApplicable
+	}
+	return w
 }
 
 func (p *Provider) listAccelerationDomains(ctx context.Context, zoneID string) ([]core.Resource, error) {
