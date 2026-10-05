@@ -228,6 +228,15 @@ M1 里最容易出错的一点：EdgeOne 域名的证书配置由 `Certificate.M
 | `--products=cdn` | 只扫 CDN，跳过 EdgeOne 与它的分页 |
 | `--json` | 结果走 stdout；进度仍走 stderr，互不干扰 |
 
+**告警分两类**（`--json` 的 `warnings[].blocking` 会标明）：
+
+| 类别 | 例子 | 是否阻断 `clean` |
+| --- | --- | --- |
+| **阻断性**（证据不完整） | `UnauthorizedOperation`（站点类型是 full/partial）、网络错误、关联查询超时 | 是 |
+| **信息性**（结构性不适用） | `ZoneNotApplicable`：EdgeOne Pages / AI / 无域名接入类型的站点 | 否 |
+
+信息性告警只打印一行说明，不附带云端原始错误（因为那不是错误，只是我们不该去碰它）。
+
 **缓存与实时的差异是正常的**：`status`（默认复用 30 分钟缓存）与 `status --no-cache`（实时）可能给出不同的 `in_use` 计数，例如同一账号下 10 vs 9——因为两张证书的绑定关系在这段时间里变化过。这正是 `update` / `clean` **永远使用实时数据**的原因：它们要据此写云端或删除证书。
 
 **为什么第一次慢**：`证书 → 云资源` 的关联关系不是一个同步接口，而是"创建异步任务 → 轮询结果"（云端自己也要遍历各产品的绑定关系）。规律是：
@@ -286,7 +295,7 @@ This account has no permission for this product, or the product is not activated
 | --- | --- |
 | `status` / `update --dry-run` | **不整体失败**：把失败的产品或站点打印为一行紧凑告警 `扫描告警：<产品> — <错误码>（<站点>）`（例如 `teo — UnauthorizedOperation (default-pages-zone)`，重复的会折叠成 `×N`），继续用读到的数据出结果。需要完整 API 名与 RequestId 时看 `--json` 的 `warnings` 字段 |
 | `update --yes` | 只对成功扫描到的产品执行写入；未扫到的产品不会被触碰 |
-| `clean` | **拒绝执行**（退出码 4），因为清理证据不完整；确认风险后可加 `--permit-partial-scan` 强制继续 |
+| `clean` | **仅对"阻断性"告警拒绝执行**（退出码 4）；结构性不适用的告警（例如 EdgeOne Pages 站点不由证书部署接口管理）**不阻断**。确认风险后仍可加 `--permit-partial-scan` 强制继续 |
 | 证书池本身取不到 | 直接失败——没有证书池无法做任何匹配 |
 
 ## M1 已知边界（不是 bug）

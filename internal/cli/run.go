@@ -85,6 +85,7 @@ type planInputs struct {
 	resources []core.Resource
 	evidence  map[string]core.BindingEvidence
 	warnings  []cloud.ScanWarning
+	blocking  []cloud.ScanWarning
 }
 
 func (a *App) collect(ctx context.Context, provider cloud.Provider, account string, cachedEvidence bool) (*planInputs, error) {
@@ -106,21 +107,27 @@ func (a *App) collect(ctx context.Context, provider cloud.Provider, account stri
 		resources: scan.Resources,
 		evidence:  scan.Evidence,
 		warnings:  scan.Warnings,
+		blocking:  scan.BlockingWarnings(),
 	}, nil
 }
 
 // warningDTO is the JSON shape of a scan warning (errors do not marshal well).
 type warningDTO struct {
-	Product string `json:"product"`
-	Action  string `json:"action"`
-	Code    string `json:"code,omitempty"`
-	Message string `json:"message,omitempty"`
+	Product  string `json:"product"`
+	Action   string `json:"action"`
+	Code     string `json:"code,omitempty"`
+	Message  string `json:"message,omitempty"`
+	Scope    string `json:"scope,omitempty"`
+	Blocking bool   `json:"blocking"`
 }
 
 func (a *App) warningDTOs(warnings []cloud.ScanWarning) []warningDTO {
 	out := make([]warningDTO, 0, len(warnings))
 	for _, w := range warnings {
-		dto := warningDTO{Product: w.Product, Action: w.Action, Code: w.Code}
+		dto := warningDTO{
+			Product: w.Product, Action: w.Action, Code: w.Code, Scope: w.Scope,
+			Blocking: !w.Informational,
+		}
 		if w.MessageKey != "" {
 			dto.Message = a.Bundle.T(w.MessageKey)
 		}
@@ -195,7 +202,9 @@ func (a *App) renderWarnings(warnings []cloud.ScanWarning) {
 		}
 		fmt.Fprintln(a.Err, a.Bundle.T("scan.warning",
 			"product", w.Product, "action", w.Action, "code", w.Code, "hint", hint))
-		if w.Err != nil {
+		// Informational warnings explain themselves; only blocking ones benefit
+		// from the raw cloud error.
+		if w.Err != nil && !w.Informational {
 			fmt.Fprintf(a.Err, "    %v\n", w.Err)
 		}
 	}
@@ -326,7 +335,7 @@ func (a *App) runClean(ctx context.Context) error {
 		}
 		a.renderWarnings(inputs.warnings)
 		a.report("progress.plan")
-		if len(inputs.warnings) > 0 && requireEvidence && !a.PartialScan {
+		if len(inputs.blocking) > 0 && requireEvidence && !a.PartialScan {
 			// Gate G2: cleanup on a partial scan could delete a certificate that
 			// a product we failed to read is still using.
 			return exitcode.New(exitcode.GateRefused, "scan.refused")

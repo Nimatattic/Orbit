@@ -89,8 +89,20 @@ type ScanResult struct {
 	Warnings     []ScanWarning
 }
 
-// Complete reports whether every product could be scanned.
-func (r ScanResult) Complete() bool { return len(r.Warnings) == 0 }
+// Complete reports whether the scan produced usable evidence, i.e. whether no
+// blocking warning was raised.
+func (r ScanResult) Complete() bool { return len(r.BlockingWarnings()) == 0 }
+
+// BlockingWarnings returns only the warnings that make the evidence incomplete.
+func (r ScanResult) BlockingWarnings() []ScanWarning {
+	out := make([]ScanWarning, 0, len(r.Warnings))
+	for _, w := range r.Warnings {
+		if !w.Informational {
+			out = append(out, w)
+		}
+	}
+	return out
+}
 
 // ScanWarning records a per-product failure that did not abort the whole scan.
 //
@@ -103,7 +115,12 @@ type ScanWarning struct {
 	MessageKey string // actionable hint
 	// Scope names the narrower target that failed, e.g. an EdgeOne site.
 	Scope string
-	Err   error
+	// Informational marks a warning that does NOT make the evidence incomplete:
+	// the target is structurally out of scope (an EdgeOne Pages site is not
+	// certificate-deployable). The zero value is deliberately the strict one, so
+	// forgetting to set this keeps a warning blocking.
+	Informational bool
+	Err           error
 }
 
 // Provider is the single seam between the engine and a cloud vendor.

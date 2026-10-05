@@ -1026,6 +1026,32 @@ func TestOneBadSiteDoesNotKillTheEdgeOneScan(t *testing.T) {
 	if w.Code != "ZoneNotApplicable" || w.MessageKey != MsgZoneNotApplicable {
 		t.Fatalf("pages sites must be reported as not applicable, got %+v", w)
 	}
+	if !w.Informational {
+		t.Fatal("a Pages site is structurally out of scope and must not block cleanup")
+	}
+	if res.Complete() == false {
+		t.Fatal("an out-of-scope site must not make the scan incomplete")
+	}
+}
+
+func TestRealProductFailureStaysBlocking(t *testing.T) {
+	denied := tcerr.NewTencentCloudSDKError("UnauthorizedOperation", "操作无权限。", "req-22")
+	teoFake := &fakeTEO{
+		zones:       []*teo.Zone{{ZoneId: common.StringPtr("zone-1"), ZoneName: common.StringPtr("main"), Type: common.StringPtr("full")}},
+		failDomains: map[string]error{"zone-1": denied},
+	}
+	p := testProvider(t, &fakeSSL{}, &fakeCDN{}, teoFake)
+
+	res, err := p.Scan(context.Background(), "demo", cloud.ScanScope{})
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if res.Complete() {
+		t.Fatal("a denied full-type site must keep the evidence incomplete")
+	}
+	if len(res.BlockingWarnings()) != 1 {
+		t.Fatalf("expected one blocking warning, got %+v", res.Warnings)
+	}
 }
 
 func TestUnknownSiteTypeKeepsThePermissionCode(t *testing.T) {

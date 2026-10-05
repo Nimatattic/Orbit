@@ -93,8 +93,11 @@ func (p *Provider) zoneWarning(zone, zoneType string, err error) cloud.ScanWarni
 	w := p.warning("teo", "teo:DescribeAccelerationDomains", err)
 	w.Scope = zone
 	if zoneTypesWithoutDeployableDomains[zoneType] {
+		// Structurally out of scope: this site never participates in
+		// certificate deployment, so it does not make the evidence incomplete.
 		w.Code = "ZoneNotApplicable"
 		w.MessageKey = MsgZoneNotApplicable
+		w.Informational = true
 	}
 	return w
 }

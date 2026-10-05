@@ -260,3 +260,30 @@ func TestCompactWarningsCarryTheScopeAndCollapseRepeats(t *testing.T) {
 		t.Fatalf("expected a single collapsed line, got %q", got)
 	}
 }
+
+func TestCleanProceedsWhenTheOnlyWarningIsOutOfScope(t *testing.T) {
+	// An EdgeOne Pages site is not certificate-deployable: skipping it must not
+	// block cleanup, otherwise `clean` could never run on such accounts.
+	provider := &stubProvider{scan: cloud.ScanResult{
+		Certificates: []core.Certificate{{
+			ID: "c-1", From: "upload", Domain: "a.example.com",
+			NotBefore: timeAgo(48), NotAfter: timeAhead(24),
+		}},
+		Warnings: []cloud.ScanWarning{{
+			Product: "teo", Action: "teo:DescribeAccelerationDomains",
+			Code: "ZoneNotApplicable", Scope: "default-pages-zone",
+			MessageKey: "cloud.warn.zone_not_applicable", Informational: true,
+		}},
+	}}
+	app := testApp(t, provider)
+
+	if err := app.runClean(context.Background()); err != nil {
+		t.Fatalf("an out-of-scope site must not block cleanup, got %v", err)
+	}
+	if !strings.Contains(app.testErr.String(), "default-pages-zone") {
+		t.Fatalf("the skipped site should still be reported, got %q", app.testErr.String())
+	}
+	if strings.Contains(app.testErr.String(), "TencentCloudSDKError") {
+		t.Fatalf("informational warnings must not dump the raw cloud error, got %q", app.testErr.String())
+	}
+}
