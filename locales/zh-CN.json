@@ -172,5 +172,15 @@
   "scan.warning_compact": "扫描告警：{product} — {code}{scope}",
   "cloud.check.identity": "凭证归属（sts:GetCallerIdentity）",
   "flag.no_cache": "忽略云端关联查询缓存，强制实时（较慢）",
-  "progress.teo.zone_skipped": "  站点 {zone}（类型 {type}）不参与证书部署，已跳过"
+  "progress.teo.zone_skipped": "  站点 {zone}（类型 {type}）不参与证书部署，已跳过",
+  "progress.apply.group": "执行：{product} × {count} 个域名（目标证书 {cert}）",
+  "progress.apply.item": "  [{index}/{total}] {domain} → {cert}",
+  "progress.apply.verifying": "  已提交，等待生效：{domain}",
+  "progress.apply.waiting": "  等待生效：{domain}（状态 {state}，已等待 {waited}）",
+  "progress.apply.verified": "  已生效：{domain}",
+  "progress.apply.unverified": "  未确认：{domain}（状态 {state}）",
+  "progress.apply.failed": "  失败：{domain}（{code}）",
+  "progress.apply.deploy": "  提交统一部署任务：{count} 个实例",
+  "progress.delete.group": "执行删除：{count} 张证书",
+  "progress.apply.summary": "执行完成：成功 {ok}，未确认 {unverified}，失败 {failed}"
 }

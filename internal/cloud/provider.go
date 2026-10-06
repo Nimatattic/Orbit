@@ -41,7 +41,11 @@ type Progress struct {
 type ApplyOptions struct {
 	DryRun            bool
 	ExperimentalWrite bool
-	Concurrency       int
+	// Concurrency bounds how many (product, certificate, strategy) groups run in
+	// parallel. Groups are independent by construction, so this is safe; within a
+	// group the product's own ordering rules apply (for example EdgeOne hosts of
+	// one site must go in a single call). Values below 1 mean 1.
+	Concurrency int
 }
 
 // DeleteOptions configures certificate deletion.

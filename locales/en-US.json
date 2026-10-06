@@ -172,5 +172,15 @@
   "scan.warning_compact": "scan warning: {product} — {code}{scope}",
   "cloud.check.identity": "credential identity (sts:GetCallerIdentity)",
   "flag.no_cache": "Ignore the cloud's association cache and query live (slower)",
-  "progress.teo.zone_skipped": "  site {zone} (type {type}) is not part of certificate deployment; skipped"
+  "progress.teo.zone_skipped": "  site {zone} (type {type}) is not part of certificate deployment; skipped",
+  "progress.apply.group": "applying: {product} x {count} domain(s) (target certificate {cert})",
+  "progress.apply.item": "  [{index}/{total}] {domain} -> {cert}",
+  "progress.apply.verifying": "  submitted, waiting for it to take effect: {domain}",
+  "progress.apply.waiting": "  waiting: {domain} (state {state}, waited {waited})",
+  "progress.apply.verified": "  effective: {domain}",
+  "progress.apply.unverified": "  unconfirmed: {domain} (state {state})",
+  "progress.apply.failed": "  failed: {domain} ({code})",
+  "progress.apply.deploy": "  submitting one unified deploy task for {count} instance(s)",
+  "progress.delete.group": "deleting {count} certificate(s)",
+  "progress.apply.summary": "done: {ok} applied, {unverified} unconfirmed, {failed} failed"
 }

@@ -208,10 +208,17 @@ func (p *Provider) ListBindings(_ context.Context, _ string, certIDs []string) (
 // state, which lets tests prove idempotency of a second plan.
 func (p *Provider) Apply(_ context.Context, _ string, plan core.Plan, opts cloud.ApplyOptions) ([]core.Result, error) {
 	results := make([]core.Result, 0, len(plan.Changes))
-	for _, ch := range plan.Pending() {
+	for i, ch := range plan.Pending() {
 		if ch.Kind != core.KindApply {
 			continue
 		}
+		target := ""
+		if ch.To != nil {
+			target = ch.To.ID
+		}
+		p.emit("progress.apply.group", "product", string(ch.Product), "count", 1, "cert", target)
+		p.emit("progress.apply.item", "index", i+1, "total", len(plan.Pending()), "domain", ch.Domain, "cert", target)
+		p.emit("progress.apply.verifying", "domain", ch.Domain)
 		res := core.Result{Change: ch, OK: true, Verified: !opts.DryRun}
 		if !opts.DryRun {
 			for i := range p.resources {
@@ -224,6 +231,9 @@ func (p *Provider) Apply(_ context.Context, _ string, plan core.Plan, opts cloud
 					}
 				}
 			}
+		}
+		if !opts.DryRun {
+			p.emit("progress.apply.verified", "domain", ch.Domain)
 		}
 		results = append(results, res)
 	}

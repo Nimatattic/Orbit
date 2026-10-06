@@ -18,6 +18,8 @@ package tencent
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
 	"time"
 
 	cdn "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdn/v20180606"
@@ -358,15 +360,11 @@ func (p *Provider) ListBindings(ctx context.Context, _ string, certIDs []string)
 
 // Apply implements cloud.Provider.
 //
-// Changes are grouped by (product, target certificate, strategy) and executed
-// group by group: the API allows only one deploy task per certificate and
-// resource type at a time (decision T7).
+// Changes are grouped by (product, target certificate, strategy) because the API
+// allows only one deploy task per certificate and resource type at a time
+// (decision T7). Groups are independent, so they run with bounded concurrency;
+// results are reassembled in group order so output stays deterministic.
 func (p *Provider) Apply(ctx context.Context, _ string, plan core.Plan, opts cloud.ApplyOptions) ([]core.Result, error) {
-	type groupKey struct {
-		product  core.Product
-		certID   string
-		strategy core.Strategy
-	}
 	order := make([]groupKey, 0, len(plan.Changes))
 	groups := map[groupKey][]core.Change{}
 	for _, ch := range plan.Pending() {
@@ -379,46 +377,104 @@ func (p *Provider) Apply(ctx context.Context, _ string, plan core.Plan, opts clo
 		}
 		groups[key] = append(groups[key], ch)
 	}
+	if len(order) == 0 {
+		return nil, nil
+	}
 
-	var results []core.Result
-	for _, key := range order {
-		changes := groups[key]
-		var (
-			groupResults []core.Result
-			err          error
-		)
-		switch {
-		case key.strategy == core.StrategyDeploy:
-			groupResults = p.applyUnified(ctx, key.product, key.certID, changes)
-		case key.product == core.ProductCDN:
-			groupResults, err = p.applyCDNGroup(ctx, key.certID, changes)
-		case key.product == core.ProductTEO:
-			groupResults, err = p.applyTEOGroup(ctx, key.certID, changes)
-		default:
-			groupResults = failedResults(changes, MsgDeployFailed,
-				fmt.Errorf("product %s has no write path in this batch", key.product))
-		}
-		results = append(results, groupResults...)
-		if err != nil {
-			if abortOn(err) {
-				return results, wrap(err)
+	concurrency := opts.Concurrency
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	if concurrency > len(order) {
+		concurrency = len(order)
+	}
+
+	type outcome struct {
+		results []core.Result
+		err     error
+	}
+	outcomes := make([]outcome, len(order))
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	for i, key := range order {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, key groupKey) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			results, err := p.runGroup(ctx, key, groups[key])
+			outcomes[i] = outcome{results: results, err: err}
+		}(i, key)
+	}
+	wg.Wait()
+
+	var (
+		results []core.Result
+		fatal   error
+	)
+	for _, out := range outcomes {
+		results = append(results, out.results...)
+		if out.err != nil {
+			if abortOn(out.err) && fatal == nil {
+				fatal = out.err
+				continue
 			}
-			// Non-fatal: keep going so one bad domain does not block the rest.
-			results = append(results, failedResults(changes, MessageKey(err), err)...)
+			// Non-fatal: the affected changes are already reported as failures.
 		}
 	}
+	if fatal != nil {
+		return results, wrap(fatal)
+	}
 	return results, nil
+}
+
+type groupKey struct {
+	product  core.Product
+	certID   string
+	strategy core.Strategy
+}
+
+// runGroup executes every change of one (product, certificate, strategy) group.
+func (p *Provider) runGroup(ctx context.Context, key groupKey, changes []core.Change) ([]core.Result, error) {
+	p.emit("progress.apply.group",
+		"product", string(key.product), "count", len(changes), "cert", key.certID)
+
+	switch {
+	case key.strategy == core.StrategyDeploy:
+		results := p.applyUnified(ctx, key.product, key.certID, changes)
+		return results, firstFailure(results)
+	case key.product == core.ProductCDN:
+		return p.applyCDNGroup(ctx, key.certID, changes)
+	case key.product == core.ProductTEO:
+		return p.applyTEOGroup(ctx, key.certID, changes)
+	default:
+		return failedResults(changes, MsgDeployFailed,
+			fmt.Errorf("product %s has no write path in this batch", key.product)), nil
+	}
+}
+
+// firstFailure surfaces an abort-worthy error (auth/role) from a result set.
+func firstFailure(results []core.Result) error {
+	for _, r := range results {
+		if r.Err != nil && abortOn(r.Err) {
+			return r.Err
+		}
+	}
+	return nil
 }
 
 // applyCDNGroup writes each domain through the route-based partial update.
 func (p *Provider) applyCDNGroup(ctx context.Context, certID string, changes []core.Change) ([]core.Result, error) {
 	results := make([]core.Result, 0, len(changes))
-	for _, ch := range changes {
+	for i, ch := range changes {
+		p.emit("progress.apply.item", "index", i+1, "total", len(changes), "domain", ch.Domain, "cert", certID)
 		res := core.Result{Change: ch, OK: true}
 		if err := p.setCDNCertificate(ctx, ch.Domain, certID); err != nil {
+			p.emit("progress.apply.failed", "domain", ch.Domain, "code", Code(err))
 			results = append(results, failure(ch, err))
 			continue
 		}
+		p.emit("progress.apply.verifying", "domain", ch.Domain)
 		verified, state, err := p.verifyCDN(ctx, ch.Domain, certID)
 		switch {
 		case err != nil:
@@ -427,9 +483,11 @@ func (p *Provider) applyCDNGroup(ctx context.Context, certID string, changes []c
 			res.Verified = false
 			res.MessageKey = MsgVerifyFailed
 			res.Err = fmt.Errorf("cdn domain %s did not report certificate %s (state %q)", ch.Domain, certID, state)
+			p.emit("progress.apply.unverified", "domain", ch.Domain, "state", state)
 			results = append(results, res)
 		default:
 			res.Verified = true
+			p.emit("progress.apply.verified", "domain", ch.Domain)
 			results = append(results, res)
 		}
 	}
@@ -456,18 +514,22 @@ func (p *Provider) applyTEOGroup(ctx context.Context, certID string, changes []c
 		for _, ch := range group {
 			hosts = append(hosts, ch.Domain)
 		}
+		p.emit("progress.apply.item", "index", len(results)+1, "total", len(changes), "domain", strings.Join(hosts, ", "), "cert", certID)
 		if err := p.setTEOCertificate(ctx, zoneID, hosts, certID); err != nil {
 			for _, ch := range group {
+				p.emit("progress.apply.failed", "domain", ch.Domain, "code", Code(err))
 				results = append(results, failure(ch, err))
 			}
 			continue
 		}
 		for _, ch := range group {
+			p.emit("progress.apply.verifying", "domain", ch.Domain)
 			verified, state, err := p.verifyTEO(ctx, zoneID, ch.Domain, certID)
 			switch {
 			case err != nil:
 				results = append(results, failure(ch, err))
 			case !verified:
+				p.emit("progress.apply.unverified", "domain", ch.Domain, "state", state)
 				results = append(results, core.Result{
 					Change:     ch,
 					OK:         true,
@@ -476,6 +538,7 @@ func (p *Provider) applyTEOGroup(ctx context.Context, certID string, changes []c
 					Err:        fmt.Errorf("edgeone host %s did not report mode %s with certificate %s (state %q)", ch.Domain, teoModeSSLCert, certID, state),
 				})
 			default:
+				p.emit("progress.apply.verified", "domain", ch.Domain)
 				results = append(results, core.Result{Change: ch, OK: true, Verified: true})
 			}
 		}
@@ -498,6 +561,7 @@ func (p *Provider) applyUnified(ctx context.Context, product core.Product, certI
 	if len(instanceIDs) == 0 {
 		return results
 	}
+	p.emit("progress.apply.deploy", "count", len(instanceIDs))
 	if _, err := p.deployInstances(ctx, certID, string(product), "", instanceIDs); err != nil {
 		for _, ch := range changes {
 			results = append(results, failure(ch, err))
@@ -505,6 +569,7 @@ func (p *Provider) applyUnified(ctx context.Context, product core.Product, certI
 		return results
 	}
 	for _, ch := range changes {
+		p.emit("progress.apply.verifying", "domain", ch.Domain)
 		verified, state, err := p.verifyProduct(ctx, ch)
 		switch {
 		case err != nil:
@@ -515,6 +580,7 @@ func (p *Provider) applyUnified(ctx context.Context, product core.Product, certI
 				Err: fmt.Errorf("resource %s did not confirm certificate %s (state %q)", ch.Domain, certID, state),
 			})
 		default:
+			p.emit("progress.apply.verified", "domain", ch.Domain)
 			results = append(results, core.Result{Change: ch, OK: true, Verified: true})
 		}
 	}

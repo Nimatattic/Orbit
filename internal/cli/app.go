@@ -13,6 +13,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -76,7 +77,9 @@ type App struct {
 	testOut *bytes.Buffer
 	testErr *bytes.Buffer
 	// progressFn renders scan progress; nil when progress is disabled.
-	progressFn  func(cloud.Progress)
+	progressFn func(cloud.Progress)
+	// progressMu serialises progress lines: apply groups run concurrently.
+	progressMu  sync.Mutex
 	WorkDir     string
 	Home        string
 	Interactive bool
@@ -286,6 +289,8 @@ func (a *App) ensureProgress() func(cloud.Progress) {
 		if bundle == nil {
 			return
 		}
+		a.progressMu.Lock()
+		defer a.progressMu.Unlock()
 		fmt.Fprintf(a.Err, "[%6.1fs] %s\n", time.Since(start).Seconds(), bundle.T(ev.Key, ev.Args...))
 	}
 	return a.progressFn

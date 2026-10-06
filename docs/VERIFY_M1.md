@@ -250,6 +250,37 @@ M1 里最容易出错的一点：EdgeOne 域名的证书配置由 `Certificate.M
 - 证书超过 100 张时会分多批创建任务，但**所有任务一次性建完后统一轮询**，总等待时间取决于最慢的那个任务，而不是批次数 × 超时。
 - 如果 5 分钟内仍有任务未完成，Orbit 会打出 `scan warning`（证据不完整）；此时 `clean` 会拒绝执行，`status` 的 `in_use` 计数对这些证书是不完整的。
 
+
+## 执行阶段（`--yes`）的进度与等待
+
+出计划之后、真正下发之前，Orbit 会打印计划表；下发过程中同样有进度：
+
+```
+[   2.1s] 执行：cdn × 2 个域名（目标证书 atVfBzFA）
+[   2.1s]   [1/2] www.example.com → atVfBzFA
+[   2.2s]   已提交，等待生效：www.example.com
+[   7.4s]   已提交，等待生效：static.example.com
+[  12.6s]   等待生效：www.example.com（状态 deploying，已等待 10s）
+[  22.1s]   已生效：www.example.com
+[  22.3s]   已生效：static.example.com
+  [ok]  cdn  www.example.com     atVfBzFA
+  [ok]  cdn  static.example.com  atVfBzFA
+[  22.5s] 执行完成：成功 2，未确认 0，失败 0
+```
+
+几个要点：
+
+| 行为 | 说明 |
+| --- | --- |
+| 「已提交，等待生效」 | 写入已被接受，正在**回读复核**：CDN 轮询 `Https.SslStatus` 到 `deployed`；EdgeOne 轮询 `Certificate.List[].Status` 到 `deployed` |
+| 「等待生效 …（状态 X，已等待 Ns）」 | 每 5 秒一次，说明还没生效但**没有卡死**；单次上限 5 分钟（`PollTimeout`） |
+| 超过上限 | **不算失败**：结果行显示 `[unverified]`，并在汇总里计入「未确认」。用 `orbit status` 再过一遍即可，不需要盲目重跑 |
+| 失败 | 结果行显示 `[failed]` + 错误码 + 可行动提示，汇总里计入「失败」 |
+| 并发 | 不同「（产品 × 目标证书 × 策略）」分组**并行**，并发度 = `defaults.concurrency.changes`（默认 2，可调大）；同一分组内按产品规则串行（EdgeOne 同站点的多个域名必须在一次调用里下发） |
+| 静默 | `--no-progress`；cron 里推荐加 |
+
+> 注意：**并发度只影响互不相关的分组**。同一个站点/同一张证书的变更仍按顺序处理，这既满足腾讯云"同一证书同一资源类型只能有一个部署任务"的限制，也避免并发写同一个域名的配置。
+
 ## 排错：`UnauthorizedOperation`（操作无权限）
 
 即使子账号是 Administrator，也可能遇到：

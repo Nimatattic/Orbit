@@ -300,7 +300,10 @@ func (a *App) runUpdate(ctx context.Context) error {
 			}
 			continue
 		}
-		results, err := provider.Apply(ctx, account, plan, cloud.ApplyOptions{ExperimentalWrite: a.ExpWrite})
+		results, err := provider.Apply(ctx, account, plan, cloud.ApplyOptions{
+			ExperimentalWrite: a.ExpWrite,
+			Concurrency:       a.Loaded.Config.Defaults.Concurrency.Changes,
+		})
 		if err != nil {
 			return a.mapProviderErr(err, provider.Name())
 		}
@@ -311,6 +314,7 @@ func (a *App) runUpdate(ctx context.Context) error {
 		} else {
 			plain.Results(a.Out, a.Bundle, results)
 		}
+		a.reportSummary(results)
 		failures += countFailures(results)
 	}
 
@@ -413,6 +417,23 @@ func (a *App) runClean(ctx context.Context) error {
 		return exitcode.New(exitcode.Partial, "doctor.fail")
 	}
 	return nil
+}
+
+// reportSummary prints the applied/unconfirmed/failed tally so a long run ends
+// with an explicit result instead of just stopping.
+func (a *App) reportSummary(results []core.Result) {
+	ok, unverified, failed := 0, 0, 0
+	for _, r := range results {
+		switch {
+		case !r.OK:
+			failed++
+		case !r.Verified:
+			unverified++
+		default:
+			ok++
+		}
+	}
+	a.report("progress.apply.summary", "ok", ok, "unverified", unverified, "failed", failed)
 }
 
 func countFailures(results []core.Result) int {

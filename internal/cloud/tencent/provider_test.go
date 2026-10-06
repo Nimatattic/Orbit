@@ -1058,3 +1058,90 @@ func TestUnknownSiteTypeKeepsThePermissionCode(t *testing.T) {
 		t.Fatalf("a full-type site failure keeps its real code, got %q", got)
 	}
 }
+
+// ----------------------------------------------------------- apply progress
+
+func TestApplyEmitsProgressEvents(t *testing.T) {
+	cdnFake := &fakeCDN{domains: []*cdn.DetailDomain{{
+		Domain: common.StringPtr("www.example.com"),
+		Status: common.StringPtr("online"),
+		Https: &cdn.Https{
+			CertInfo:  &cdn.ServerCert{CertId: common.StringPtr("c-old")},
+			SslStatus: common.StringPtr("deployed"),
+		},
+	}}}
+
+	var mu sync.Mutex
+	var keys []string
+	opts := Options{Region: "ap-guangzhou", PollInterval: time.Second, PollTimeout: 30 * time.Second, MaxAttempts: 3}.withDefaults()
+	opts.Progress = func(ev cloud.Progress) {
+		mu.Lock()
+		defer mu.Unlock()
+		keys = append(keys, ev.Key)
+	}
+	clk := newClock()
+	p := newWithClients("demo", opts, &fakeSSL{}, cdnFake, &fakeTEO{})
+	p.now, p.sleep = clk.now, clk.sleep
+	p.limiters = map[string]*limiter{
+		"ssl": newLimiter(1000, clk.now, clk.sleep),
+		"cdn": newLimiter(1000, clk.now, clk.sleep),
+		"teo": newLimiter(1000, clk.now, clk.sleep),
+	}
+
+	plan := core.Plan{Changes: []core.Change{{
+		Product: core.ProductCDN, Domain: "www.example.com", Kind: core.KindApply,
+		Strategy: core.StrategyProduct, To: &core.CertRef{ID: "c-new"},
+	}}}
+	if _, err := p.Apply(context.Background(), "demo", plan, cloud.ApplyOptions{Concurrency: 2}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	joined := strings.Join(keys, ",")
+	for _, want := range []string{
+		"progress.apply.group",
+		"progress.apply.item",
+		"progress.apply.verifying",
+		"progress.apply.verified",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing apply progress event %q in %v", want, keys)
+		}
+	}
+}
+
+func TestApplyKeepsGroupOrderWithConcurrency(t *testing.T) {
+	cdnFake := &fakeCDN{domains: []*cdn.DetailDomain{{
+		Domain: common.StringPtr("www.example.com"),
+		Https:  &cdn.Https{CertInfo: &cdn.ServerCert{CertId: common.StringPtr("c-old")}, SslStatus: common.StringPtr("deployed")},
+	}}}
+	teoFake := &fakeTEO{
+		zones: []*teo.Zone{{ZoneId: common.StringPtr("zone-1")}},
+		domains: map[string][]*teo.AccelerationDomain{
+			"zone-1": {{ZoneId: common.StringPtr("zone-1"), DomainName: common.StringPtr("api.example.com"), DomainStatus: common.StringPtr("online")}},
+		},
+	}
+	p := testProvider(t, &fakeSSL{}, cdnFake, teoFake)
+
+	plan := core.Plan{Changes: []core.Change{
+		{Product: core.ProductCDN, Domain: "www.example.com", Kind: core.KindApply, Strategy: core.StrategyProduct, To: &core.CertRef{ID: "c-new"}},
+		{Product: core.ProductTEO, ZoneID: "zone-1", Domain: "api.example.com", Kind: core.KindApply, Strategy: core.StrategyProduct, To: &core.CertRef{ID: "c-new"}},
+	}}
+	results, err := p.Apply(context.Background(), "demo", plan, cloud.ApplyOptions{Concurrency: 4})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected two results, got %d", len(results))
+	}
+	// Group order follows the plan, regardless of which group finished first.
+	if results[0].Change.Product != core.ProductCDN || results[1].Change.Product != core.ProductTEO {
+		t.Fatalf("results must keep group order, got %s then %s", results[0].Change.Product, results[1].Change.Product)
+	}
+	for _, r := range results {
+		if !r.OK || !r.Verified {
+			t.Fatalf("both writes should be verified: %+v", r)
+		}
+	}
+}
