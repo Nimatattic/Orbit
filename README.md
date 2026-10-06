@@ -22,7 +22,7 @@
 | M2 匹配引擎打磨（计划渲染、风险分级已可用） | 部分可用 |
 | M3 应用执行（`ModifyDomainConfig` / `ModifyHostsCertificate`） | ◐ 写入与回读复核已实现并测试；审计日志与并发调优待补 |
 | M4 清理执行（删除 + 证书材料备份 + 任务状态分类） | ⏳ 未开始 |
-| M5 TUI（多 Tab、账号多选、计划预览） | ⏳ 未开始 |
+| M5 TUI（多 Tab、账号多选、计划预览） | ◐ **交互式执行界面已完成**（扫描/计划/确认/执行/结果，含动态等待）；多 Tab 总览与账号多选待做 |
 | M6 交付（打包、cron/systemd、CAM 模板） | ⏳ 未开始 |
 
 **现在能做什么**：真实腾讯云账号的只读采集（证书池 / CDN 域名 / EdgeOne 站点与域名 / 证书↔资源关联查询）、匹配与计划、清理候选；写入路径（CDN `ModifyDomainConfig`、EdgeOne `ModifyHostsCertificate`、SSL `DeployCertificateInstance`）已实现并带**回读复核**；另外还有配置与凭证管理、环境自检、多语言、以及完全不触网的 `--demo` 演示链路。
@@ -41,6 +41,18 @@ make test             # 单元测试（全部离线，走 cloud/fake）
 make vet              # go vet
 make release          # linux/amd64, linux/arm64, darwin/arm64 静态二进制
 ```
+
+## 运行模式（由参数决定）
+
+| 你输入 | 行为 |
+| --- | --- |
+| `orbit update --ssl`（终端下） | **进入 TUI**：全屏显示扫描进度 → 变更确认页 → 执行页（逐条状态与动态等待）→ 结果页；`y` 执行、`n`/`esc` 取消 |
+| `orbit update --ssl --dry-run` | 只出计划，纯文本，**绝不写云端** |
+| `orbit update --ssl --yes` | CLI 批处理模式（cron / 脚本用），逐行进度 |
+| 非终端环境（无 TTY） | 自动降级为纯文本：无 `--yes` 时只出计划 |
+| `--no-tui` / `--json` | 强制纯文本 / 结构化输出 |
+
+TUI 只接管屏幕，日志与结果仍会落回终端（退出后打印文本结果，便于留痕）。`orbit clean` 的交互流程与 `update` 一致。
 
 ## 快速上手（不触网，用演示数据）
 

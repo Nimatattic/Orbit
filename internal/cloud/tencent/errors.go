@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,6 +35,7 @@ const (
 	MsgNoPermission       = "cloud.err.no_permission"
 	MsgEvidenceIncomplete = "cloud.err.evidence_incomplete"
 	MsgCDNConfigRejected  = "cloud.err.cdn_config_rejected"
+	MsgCDNDomainDisabled  = "cloud.err.cdn_domain_disabled"
 )
 
 // retryableCodes are cloud error codes worth retrying: transient limits and
@@ -115,10 +117,51 @@ func MessageKey(err error) string {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return MsgUnknown
 	}
+	// A more specific condition may be hiding behind a shared code.
+	if key := messageKeyByText(sdkMessage(err)); key != "" {
+		return key
+	}
 	if key, ok := messageKeys[Code(err)]; ok {
 		return key
 	}
 	return MsgUnknown
+}
+
+// sdkMessage returns the cloud error message, or "" for local errors.
+func sdkMessage(err error) string {
+	var sdkErr *tcerr.TencentCloudSDKError
+	if errors.As(err, &sdkErr) {
+		return sdkErr.GetMessage()
+	}
+	return ""
+}
+
+// messageKeysByText recognises conditions that share one error code. Tencent
+// Cloud reuses `FailedOperation.CdnConfigError` for several distinct problems
+// (acceleration disabled, config rejected, ...), so the message is the only
+// discriminator. Patterns are matched case-insensitively.
+//
+// These are the "known error types" we can name precisely; anything else falls
+// back to the code-based hint.
+var messageKeysByText = []struct {
+	contains string
+	key      string
+}{
+	{"加速服务已关闭", MsgCDNDomainDisabled},
+	{"acceleration service is disabled", MsgCDNDomainDisabled},
+	{"加速域名已关闭", MsgCDNDomainDisabled},
+	{"未备案", MsgNoICP},
+	{"has no icp filing", MsgNoICP},
+}
+
+func messageKeyByText(msg string) string {
+	lower := strings.ToLower(msg)
+	for _, m := range messageKeysByText {
+		if strings.Contains(lower, strings.ToLower(m.contains)) {
+			return m.key
+		}
+	}
+	return ""
 }
 
 // messageKeyer is implemented by errors that already carry a resolved key.

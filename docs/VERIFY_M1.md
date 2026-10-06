@@ -251,6 +251,33 @@ M1 里最容易出错的一点：EdgeOne 域名的证书配置由 `Certificate.M
 - 如果 5 分钟内仍有任务未完成，Orbit 会打出 `scan warning`（证据不完整）；此时 `clean` 会拒绝执行，`status` 的 `in_use` 计数对这些证书是不完整的。
 
 
+## 交互式 TUI（不带 `--yes` / `--dry-run`）
+
+在终端里直接跑 `orbit update --ssl`（或 `orbit clean --ssl`）会进入全屏交互界面：
+
+```
+Orbit · 应用证书 · main                                          12s
+产品：cdn, teo
+
+执行中：已生效 3，未确认 0，失败 1，处理中 3
+
+  ⠋   TEO    hadoop.2.lab.frp.example.com    arulzk3q     等待生效 8s
+  ✓   TEO    hadoop.1.lab.frp.example.com    arulzk3q     已生效
+  ✗   CDN    cx-checkin.apps.example.com     at8eACUd     失败  FailedOperation.CdnConfigError
+  ·   CDN    static.example.com              at8eACUd     待处理
+```
+
+要点：
+
+| 行为 | 说明 |
+| --- | --- |
+| 确认页 | 列出**将要写入的每一条**变更（产品 / 域名 / 目标证书）；`y` 或回车执行，`n` / `esc` 取消，取消时**不写任何内容** |
+| 动态等待 | 等待云端回报的那一行显示**转动的进度指示 + 已等待秒数**，不会再出现"卡住"的观感 |
+| 并发 | 与批处理模式一致：不同（产品 × 证书 × 策略）分组并行，组内按产品规则串行 |
+| 退出 | 结束后按回车或 `q` 退出；终端恢复后会把同一批结果以**文本形式**再打印一遍，便于留痕 |
+| 取消/中断 | `ctrl+c` 或 `esc` 会取消上下文；已经提交的变更不会回滚（云端无法回滚），未提交的不会执行 |
+| `--no-tui` | 强制纯文本模式（等同批处理/计划输出） |
+
 ## 执行阶段（`--yes`）的进度与等待
 
 出计划之后、真正下发之前，Orbit 会打印计划表；下发过程中同样有进度：

@@ -17,6 +17,7 @@ import (
 	"github.com/Crequency/orbit/internal/exitcode"
 	"github.com/Crequency/orbit/internal/i18n"
 	"github.com/Crequency/orbit/internal/render/plain"
+	"github.com/Crequency/orbit/internal/render/tui"
 )
 
 func (a *App) newStatusCmd() *cobra.Command {
@@ -260,6 +261,10 @@ func (a *App) runUpdate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if a.wantsTUI() && len(targets) == 1 {
+		return a.tuiUpdate(ctx, targets[0])
+	}
+
 	failures := 0
 	for _, account := range targets {
 		provider, err := a.providerFor(account)
@@ -344,6 +349,10 @@ func (a *App) runClean(ctx context.Context) error {
 	requireEvidence := cfg.Defaults.Clean.RequireFullEvidence && !a.PartialScan
 	if a.PartialScan {
 		fmt.Fprintln(a.Err, "warning: --permit-partial-scan disables the completeness gate (G2)")
+	}
+
+	if a.wantsTUI() && len(targets) == 1 {
+		return a.tuiClean(ctx, targets[0])
 	}
 
 	failures := 0
@@ -433,7 +442,14 @@ func (a *App) reportSummary(results []core.Result) {
 			ok++
 		}
 	}
-	a.report("progress.apply.summary", "ok", ok, "unverified", unverified, "failed", failed)
+	// In batch mode this joins the progress stream; after a TUI run the stream is
+	// gone, so the same tally is printed as plain text without a fake timestamp.
+	if fn := a.ensureProgress(); fn != nil {
+		fn(cloud.Progress{Key: "progress.apply.summary",
+			Args: []any{"ok", ok, "unverified", unverified, "failed", failed}})
+		return
+	}
+	fmt.Fprintln(a.Out, a.Bundle.T("tui.done", "ok", ok, "unconfirmed", unverified, "failed", failed))
 }
 
 func countFailures(results []core.Result) int {
@@ -630,4 +646,189 @@ func (a *App) doctorChecks() []core.Check {
 		}
 	}
 	return checks
+}
+
+// mode selection -----------------------------------------------------------
+
+// wantsTUI reports whether the command should take over the terminal.
+//
+// Contract: --dry-run keeps the CLI (a plan to read), --yes keeps the CLI batch
+// mode (for cron and scripts), --no-tui forces text. Everything else on a
+// terminal is interactive.
+func (a *App) wantsTUI() bool {
+	if a.DryRun || a.Yes || a.NoTUI || a.JSON {
+		return false
+	}
+	return a.Interactive
+}
+
+// tuiUpdate runs `update` interactively: scan, show the plan, ask for
+// confirmation, then apply with live per-change state.
+func (a *App) tuiUpdate(ctx context.Context, account string) error {
+	events := make(chan cloud.Progress, 512)
+	a.progressSink = events
+	a.progressFn = nil
+
+	provider, err := a.providerFor(account)
+	if err != nil {
+		return err
+	}
+	products, err := a.products(account)
+	if err != nil {
+		return err
+	}
+
+	var plan core.Plan
+	job := tui.Job{
+		Title:   a.Bundle.T("cmd.update.short") + " · " + account,
+		Summary: []string{a.Bundle.T("tui.summary.products", "products", strings.Join(products, ", "))},
+		Scan: func(scanCtx context.Context) ([]tui.Item, error) {
+			inputs, err := a.collect(scanCtx, provider, account, collectOptions{})
+			if err != nil {
+				return nil, err
+			}
+			a.renderWarnings(inputs.warnings)
+			opts, err := a.updateOptions(account)
+			if err != nil {
+				return nil, err
+			}
+			plan = core.BuildUpdatePlan(inputs.resources, inputs.certs, opts)
+			items := make([]tui.Item, 0, plan.ApplyCount())
+			for _, ch := range plan.Pending() {
+				target := ""
+				if ch.To != nil {
+					target = ch.To.ID
+				}
+				items = append(items, tui.NewItem(string(ch.Product), ch.Domain, target, ""))
+			}
+			return items, nil
+		},
+		Apply: func(applyCtx context.Context) ([]core.Result, error) {
+			return provider.Apply(applyCtx, account, plan, cloud.ApplyOptions{
+				ExperimentalWrite: a.ExpWrite,
+				Concurrency:       a.Loaded.Config.Defaults.Concurrency.Changes,
+			})
+		},
+	}
+
+	outcome, err := tui.Run(ctx, a.Bundle, events, job)
+	// Reset the sink before reporting: the channel may still receive events from
+	// an in-flight apply, and those sends must never reach a closed channel (and
+	// the summary belongs on the normal text path anyway).
+	a.progressSink = nil
+	a.progressFn = nil
+	if err != nil {
+		return a.mapProviderErr(err, provider.Name())
+	}
+	if outcome.Cancelled {
+		fmt.Fprintln(a.Out, a.Bundle.T("tui.cancelled"))
+		return nil
+	}
+	if len(outcome.Results) == 0 {
+		fmt.Fprintln(a.Out, a.Bundle.T("msg.nothing_to_do"))
+		return nil
+	}
+	fmt.Fprintln(a.Out, a.Bundle.T("tui.restored"))
+	plain.Results(a.Out, a.Bundle, outcome.Results)
+	a.reportSummary(outcome.Results)
+	if failures := countFailures(outcome.Results); failures > 0 {
+		return exitcode.New(exitcode.Partial, "doctor.fail")
+	}
+	return nil
+}
+
+// tuiClean runs `clean` interactively: scan, show the candidates, ask for
+// confirmation, then delete with live per-certificate state.
+func (a *App) tuiClean(ctx context.Context, account string) error {
+	events := make(chan cloud.Progress, 512)
+	a.progressSink = events
+	a.progressFn = nil
+
+	provider, err := a.providerFor(account)
+	if err != nil {
+		return err
+	}
+	cfg := a.Loaded.Config
+	olderThanRaw := a.OlderThan
+	if strings.TrimSpace(olderThanRaw) == "" {
+		olderThanRaw = cfg.Defaults.Clean.OlderThan
+	}
+	olderThan, err := config.ParseDuration(olderThanRaw)
+	if err != nil {
+		return exitcode.Wrap(err, exitcode.Fatal, "err.invalid_duration", "value", olderThanRaw)
+	}
+	requireEvidence := cfg.Defaults.Clean.RequireFullEvidence && !a.PartialScan
+
+	var (
+		candidateIDs  []string
+		candidatePlan []core.CleanCandidate
+	)
+	job := tui.Job{
+		Title:   a.Bundle.T("cmd.clean.short") + " · " + account,
+		Summary: []string{a.Bundle.T("tui.summary.clean", "older", olderThanRaw)},
+		Scan: func(scanCtx context.Context) ([]tui.Item, error) {
+			inputs, err := a.collect(scanCtx, provider, account, collectOptions{needEvidence: true})
+			if err != nil {
+				return nil, err
+			}
+			a.renderWarnings(inputs.warnings)
+			if len(inputs.blocking) > 0 && requireEvidence && !a.PartialScan {
+				return nil, exitcode.New(exitcode.GateRefused, "scan.refused")
+			}
+			plan := core.CleanCandidates(inputs.certs, inputs.evidence, inputs.resources, core.CleanOptions{
+				Account:             account,
+				Now:                 time.Now(),
+				OlderThan:           olderThan,
+				RequireFullEvidence: requireEvidence,
+				IncludeFree:         a.IncludeFree,
+				ProtectPatterns:     cfg.Defaults.Clean.ProtectPatterns,
+			})
+			items := make([]tui.Item, 0, len(plan.Candidates))
+			candidateIDs = candidateIDs[:0]
+			candidatePlan = plan.Candidates
+			for _, c := range plan.Candidates {
+				candidateIDs = append(candidateIDs, c.Cert.ID)
+				items = append(items, tui.NewItem("ssl", c.Cert.Alias, c.SupersededBy, c.Cert.ID))
+			}
+			return items, nil
+		},
+		Apply: func(applyCtx context.Context) ([]core.Result, error) {
+			dir := a.BackupDir
+			if dir == "" {
+				dir = config.BackupsDir()
+			}
+			// Backup before deleting: the metadata record is the operator's only
+			// trace of what was removed.
+			if err := backupMetadata(dir, account, candidatePlan); err != nil {
+				return nil, err
+			}
+			return provider.DeleteCertificates(applyCtx, account, candidateIDs, cloud.DeleteOptions{
+				BackupDir:     dir,
+				CheckBindings: true,
+			})
+		},
+	}
+
+	outcome, err := tui.Run(ctx, a.Bundle, events, job)
+	// See tuiUpdate: never close the channel while an apply may still emit.
+	a.progressSink = nil
+	a.progressFn = nil
+	if err != nil {
+		return a.mapProviderErr(err, provider.Name())
+	}
+	if outcome.Cancelled {
+		fmt.Fprintln(a.Out, a.Bundle.T("tui.cancelled"))
+		return nil
+	}
+	if len(outcome.Results) == 0 {
+		fmt.Fprintln(a.Out, a.Bundle.T("msg.nothing_to_do"))
+		return nil
+	}
+	fmt.Fprintln(a.Out, a.Bundle.T("tui.restored"))
+	plain.Results(a.Out, a.Bundle, outcome.Results)
+	a.reportSummary(outcome.Results)
+	if failures := countFailures(outcome.Results); failures > 0 {
+		return exitcode.New(exitcode.Partial, "doctor.fail")
+	}
+	return nil
 }

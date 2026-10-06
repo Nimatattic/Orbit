@@ -1189,3 +1189,23 @@ func TestCDNConfigErrorsAreActionable(t *testing.T) {
 		t.Fatalf("message key = %q, want %q", got, MsgCDNConfigRejected)
 	}
 }
+
+func TestSharedErrorCodesAreDisambiguatedByMessage(t *testing.T) {
+	// The same code means different things; the message decides.
+	disabled := tcerr.NewTencentCloudSDKError("FailedOperation.CdnConfigError",
+		"域名加速服务已关闭，请先前往域名管理启动域名", "req-40")
+	if got := MessageKey(disabled); got != MsgCDNDomainDisabled {
+		t.Fatalf("message key = %q, want %q", got, MsgCDNDomainDisabled)
+	}
+
+	generic := tcerr.NewTencentCloudSDKError("FailedOperation.CdnConfigError", "配置错误", "req-41")
+	if got := MessageKey(generic); got != MsgCDNConfigRejected {
+		t.Fatalf("generic CdnConfigError = %q, want %q", got, MsgCDNConfigRejected)
+	}
+
+	english := tcerr.NewTencentCloudSDKError("FailedOperation.CdnConfigError",
+		"The acceleration service is disabled for this domain.", "req-42")
+	if got := MessageKey(english); got != MsgCDNDomainDisabled {
+		t.Fatalf("english message = %q, want %q", got, MsgCDNDomainDisabled)
+	}
+}

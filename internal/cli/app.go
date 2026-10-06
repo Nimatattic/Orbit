@@ -79,10 +79,13 @@ type App struct {
 	// progressFn renders scan progress; nil when progress is disabled.
 	progressFn func(cloud.Progress)
 	// progressMu serialises progress lines: apply groups run concurrently.
-	progressMu  sync.Mutex
-	WorkDir     string
-	Home        string
-	Interactive bool
+	progressMu sync.Mutex
+	// progressSink, when set, receives progress events instead of printing them
+	// (interactive TUI mode).
+	progressSink chan<- cloud.Progress
+	WorkDir      string
+	Home         string
+	Interactive  bool
 }
 
 // Execute runs the CLI and returns the process exit code.
@@ -278,6 +281,17 @@ func (a *App) accountConfig(alias string) (config.Account, bool) {
 // forced with --progress or silenced with --no-progress.
 func (a *App) ensureProgress() func(cloud.Progress) {
 	if a.progressFn != nil {
+		return a.progressFn
+	}
+	if a.progressSink != nil {
+		a.progressFn = func(ev cloud.Progress) {
+			// Never block the provider: the UI consumes as fast as it can and a
+			// dropped animation frame is preferable to a stalled run.
+			select {
+			case a.progressSink <- ev:
+			default:
+			}
+		}
 		return a.progressFn
 	}
 	if !a.Progress && (a.NoProgress || !tty.IsTerminal(os.Stderr)) {
