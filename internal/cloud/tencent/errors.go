@@ -33,6 +33,7 @@ const (
 	MsgAuthFailed         = "cloud.err.auth_failed"
 	MsgNoPermission       = "cloud.err.no_permission"
 	MsgEvidenceIncomplete = "cloud.err.evidence_incomplete"
+	MsgCDNConfigRejected  = "cloud.err.cdn_config_rejected"
 )
 
 // retryableCodes are cloud error codes worth retrying: transient limits and
@@ -73,6 +74,10 @@ var messageKeys = map[string]string{
 	"ResourceUnavailable.HostNotFound":                     MsgNotFound,
 	"ResourceUnavailable.ZoneNotFound":                     MsgNotFound,
 	"ResourceUnavailable.CdnHostNoIcp":                     MsgNoICP,
+	"FailedOperation.CdnConfigError":                       MsgCDNConfigRejected,
+	"InvalidParameter.CdnHostInvalidStatus":                MsgCDNConfigRejected,
+	"InvalidParameter.CDNStatusInvalidDomain":              MsgCDNConfigRejected,
+	"InvalidParameter.AccessPortOpenedHttps":               MsgCDNConfigRejected,
 	"OperationDenied.DomainNoICP":                          MsgNoICP,
 	"InvalidParameter.RegionNotEmpty":                      MsgRegionRequired,
 	"InvalidParameterValue.InvalidRegion":                  MsgRegionInvalid,

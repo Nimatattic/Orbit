@@ -114,7 +114,7 @@ func BuildUpdatePlan(resources []Resource, certs []Certificate, opts PlanOptions
 		}
 		change.To = Ref(best)
 
-		if res.BoundCert != "" && res.BoundCert == best.ID {
+		if res.HasBoundCert(best.ID) {
 			change.Kind = KindUpToDate
 			plan.Changes = append(plan.Changes, change)
 			continue

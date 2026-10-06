@@ -524,11 +524,16 @@ func (p *Provider) applyTEOGroup(ctx context.Context, certID string, changes []c
 		}
 		for _, ch := range group {
 			p.emit("progress.apply.verifying", "domain", ch.Domain)
-			verified, state, err := p.verifyTEO(ctx, zoneID, ch.Domain, certID)
+		}
+		// One read per poll round covers every host of the site.
+		verified, states, err := p.verifyTEOBatch(ctx, zoneID, hosts, certID)
+		for _, ch := range group {
+			key := strings.ToLower(ch.Domain)
 			switch {
 			case err != nil:
 				results = append(results, failure(ch, err))
-			case !verified:
+			case !verified[key]:
+				state := states[key]
 				p.emit("progress.apply.unverified", "domain", ch.Domain, "state", state)
 				results = append(results, core.Result{
 					Change:     ch,

@@ -255,6 +255,8 @@ type fakeTEO struct {
 	failZones  error
 	// failDomains makes DescribeAccelerationDomains fail for specific sites.
 	failDomains map[string]error
+	// listCalls counts enumeration calls, to assert polling behaviour.
+	listCalls int
 }
 
 func (f *fakeTEO) DescribeZones(*teo.DescribeZonesRequest) (*teo.DescribeZonesResponse, error) {
@@ -268,6 +270,7 @@ func (f *fakeTEO) DescribeZones(*teo.DescribeZonesRequest) (*teo.DescribeZonesRe
 }
 
 func (f *fakeTEO) DescribeAccelerationDomains(req *teo.DescribeAccelerationDomainsRequest) (*teo.DescribeAccelerationDomainsResponse, error) {
+	f.listCalls++
 	if err, ok := f.failDomains[str(req.ZoneId)]; ok {
 		return nil, err
 	}
@@ -1143,5 +1146,46 @@ func TestApplyKeepsGroupOrderWithConcurrency(t *testing.T) {
 		if !r.OK || !r.Verified {
 			t.Fatalf("both writes should be verified: %+v", r)
 		}
+	}
+}
+
+func TestTEOBatchVerificationUsesOneReadPerRound(t *testing.T) {
+	// Six hosts, one site: verification must not poll once per host.
+	teoFake := &fakeTEO{
+		zones: []*teo.Zone{{ZoneId: common.StringPtr("zone-1"), ZoneName: common.StringPtr("lab")}},
+		domains: map[string][]*teo.AccelerationDomain{
+			"zone-1": {
+				{ZoneId: common.StringPtr("zone-1"), DomainName: common.StringPtr("a.lab.example.com"), DomainStatus: common.StringPtr("online")},
+				{ZoneId: common.StringPtr("zone-1"), DomainName: common.StringPtr("b.lab.example.com"), DomainStatus: common.StringPtr("online")},
+			},
+		},
+	}
+	p := testProvider(t, &fakeSSL{}, &fakeCDN{}, teoFake)
+
+	plan := core.Plan{Changes: []core.Change{
+		{Product: core.ProductTEO, ZoneID: "zone-1", Domain: "a.lab.example.com", Kind: core.KindApply, Strategy: core.StrategyProduct, To: &core.CertRef{ID: "c-new"}},
+		{Product: core.ProductTEO, ZoneID: "zone-1", Domain: "b.lab.example.com", Kind: core.KindApply, Strategy: core.StrategyProduct, To: &core.CertRef{ID: "c-new"}},
+	}}
+	results, err := p.Apply(context.Background(), "demo", plan, cloud.ApplyOptions{Concurrency: 2})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected two results, got %d", len(results))
+	}
+	for _, r := range results {
+		if !r.OK || !r.Verified {
+			t.Fatalf("both hosts should verify in one round: %+v", r)
+		}
+	}
+	if teoFake.listCalls > 4 {
+		t.Fatalf("verification should read the site a small number of times, got %d calls", teoFake.listCalls)
+	}
+}
+
+func TestCDNConfigErrorsAreActionable(t *testing.T) {
+	err := tcerr.NewTencentCloudSDKError("FailedOperation.CdnConfigError", "配置错误", "req-30")
+	if got := MessageKey(err); got != MsgCDNConfigRejected {
+		t.Fatalf("message key = %q, want %q", got, MsgCDNConfigRejected)
 	}
 }

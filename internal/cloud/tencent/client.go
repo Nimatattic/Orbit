@@ -20,7 +20,10 @@ const (
 	defaultAPITimeout   = 15 * time.Second
 	defaultPollInterval = 5 * time.Second
 	defaultPollTimeout  = 5 * time.Minute
-	defaultMaxAttempts  = 4
+	// Product-side writes propagate faster than the SSL deploy tasks, so the
+	// read-back verification gets its own, shorter budget.
+	defaultVerifyTimeout = 2 * time.Minute
+	defaultMaxAttempts   = 4
 
 	sslQPS = 10 // per API + endpoint region + sub-account
 	cdnQPS = 20
@@ -43,7 +46,9 @@ type Options struct {
 	APITimeout   time.Duration
 	PollInterval time.Duration
 	PollTimeout  time.Duration
-	MaxAttempts  int
+	// VerifyTimeout bounds the read-back verification of a product-side write.
+	VerifyTimeout time.Duration
+	MaxAttempts   int
 	// Progress receives scan events; nil disables reporting.
 	Progress func(cloud.Progress)
 }
@@ -60,6 +65,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.PollTimeout <= 0 {
 		o.PollTimeout = defaultPollTimeout
+	}
+	if o.VerifyTimeout <= 0 {
+		o.VerifyTimeout = defaultVerifyTimeout
 	}
 	if o.MaxAttempts <= 0 {
 		o.MaxAttempts = defaultMaxAttempts

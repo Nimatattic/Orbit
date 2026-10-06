@@ -85,7 +85,11 @@ type Resource struct {
 	Name      string
 	Domain    string
 	Status    string
-	BoundCert string // currently bound certificate ID ("" when unbound)
+	BoundCert string // primary bound certificate ID ("" when unbound)
+	// BoundCertIDs lists every certificate the target currently holds. EdgeOne
+	// can keep more than one (for example RSA + SM2), so "already up to date"
+	// must match the whole set rather than just the primary entry.
+	BoundCertIDs []string
 
 	// BoundMode is EdgeOne's Certificate.Mode: sslcert / eofreecert /
 	// eofreecert_manual / disable. Empty for CDN.
@@ -105,6 +109,22 @@ type Resource struct {
 	// InstanceKey is the product specific identifier used by
 	// DeployCertificateInstance, pre-rendered during enumeration.
 	InstanceKey string
+}
+
+// HasBoundCert reports whether the target currently holds the given certificate.
+func (r Resource) HasBoundCert(certID string) bool {
+	if certID == "" {
+		return false
+	}
+	if r.BoundCert == certID {
+		return true
+	}
+	for _, id := range r.BoundCertIDs {
+		if id == certID {
+			return true
+		}
+	}
+	return false
 }
 
 // BindingDetail is one product/region entry of the association query.

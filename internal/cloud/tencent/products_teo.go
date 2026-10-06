@@ -3,6 +3,7 @@ package tencent
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 	teo "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/teo/v20220901"
@@ -146,10 +147,19 @@ func toTEOResource(d *teo.AccelerationDomain) core.Resource {
 	}
 	if d.Certificate != nil {
 		res.BoundMode = str(d.Certificate.Mode)
-		if len(d.Certificate.List) > 0 && d.Certificate.List[0] != nil {
-			res.BoundCert = str(d.Certificate.List[0].CertId)
-			res.BoundNotAfter = parseTime(str(d.Certificate.List[0].ExpireTime))
-			res.CertState = str(d.Certificate.List[0].Status)
+		// A host may hold several certificates; report all of them and use the
+		// one that expires last as the primary for display purposes.
+		for _, info := range d.Certificate.List {
+			if info == nil || str(info.CertId) == "" {
+				continue
+			}
+			res.BoundCertIDs = append(res.BoundCertIDs, str(info.CertId))
+			expires := parseTime(str(info.ExpireTime))
+			if res.BoundCert == "" || expires.After(res.BoundNotAfter) {
+				res.BoundCert = str(info.CertId)
+				res.BoundNotAfter = expires
+				res.CertState = str(info.Status)
+			}
 		}
 		res.BoundForeign = res.BoundMode != "" && res.BoundMode != teoModeSSLCert && res.BoundMode != "disable"
 	}
@@ -206,26 +216,63 @@ func (p *Provider) setTEOCertificate(ctx context.Context, zoneID string, hosts [
 	return err
 }
 
-// verifyTEO polls until the host reports Mode=sslcert with the expected id.
-func (p *Provider) verifyTEO(ctx context.Context, zoneID, domain, certID string) (bool, string, error) {
-	deadline := p.now().Add(p.opts.PollTimeout)
-	state := ""
+// verifyTEOBatch polls the site once per round and reports which hosts already
+// report Mode=sslcert with the expected certificate.
+//
+// Verifying host by host would multiply the wait by the number of hosts (6 hosts
+// x 2 minutes), while the site listing returns all of them in a single call.
+func (p *Provider) verifyTEOBatch(ctx context.Context, zoneID string, domains []string, certID string) (map[string]bool, map[string]string, error) {
+	want := make(map[string]bool, len(domains))
+	for _, d := range domains {
+		want[strings.ToLower(d)] = true
+	}
+	verified := map[string]bool{}
+	states := map[string]string{}
+
+	deadline := p.now().Add(p.opts.VerifyTimeout)
+	start := p.now()
 	for {
-		res, found, err := p.getTEODomain(ctx, zoneID, domain)
+		items, err := p.listAccelerationDomains(ctx, zoneID)
 		if err != nil {
-			return false, state, err
+			return verified, states, err
 		}
-		if found {
-			state = res.CertState
-			if res.BoundMode == teoModeSSLCert && res.BoundCert == certID && res.CertState != "processing" {
-				return true, state, nil
+		for _, res := range items {
+			key := strings.ToLower(res.Domain)
+			if !want[key] {
+				continue
+			}
+			states[key] = res.CertState
+			if res.BoundMode == teoModeSSLCert && res.HasBoundCert(certID) && res.CertState != "processing" {
+				verified[key] = true
 			}
 		}
-		if !p.now().Before(deadline) {
-			return false, state, nil
+		if len(verified) == len(want) {
+			return verified, states, nil
 		}
+		if !p.now().Before(deadline) {
+			return verified, states, nil
+		}
+		pending := make([]string, 0, len(want))
+		for _, d := range domains {
+			if !verified[strings.ToLower(d)] {
+				pending = append(pending, d)
+			}
+		}
+		p.emit("progress.apply.waiting",
+			"domain", strings.Join(pending, ", "),
+			"state", states[strings.ToLower(pending[0])],
+			"waited", p.now().Sub(start).Round(time.Second).String())
 		if err := p.sleep(ctx, p.opts.PollInterval); err != nil {
-			return false, state, err
+			return verified, states, err
 		}
 	}
+}
+
+// verifyTEO verifies a single host.
+func (p *Provider) verifyTEO(ctx context.Context, zoneID, domain, certID string) (bool, string, error) {
+	verified, states, err := p.verifyTEOBatch(ctx, zoneID, []string{domain}, certID)
+	if err != nil {
+		return false, "", err
+	}
+	return verified[strings.ToLower(domain)], states[strings.ToLower(domain)], nil
 }

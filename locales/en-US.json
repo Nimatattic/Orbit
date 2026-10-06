@@ -182,5 +182,6 @@
   "progress.apply.failed": "  failed: {domain} ({code})",
   "progress.apply.deploy": "  submitting one unified deploy task for {count} instance(s)",
   "progress.delete.group": "deleting {count} certificate(s)",
-  "progress.apply.summary": "done: {ok} applied, {unverified} unconfirmed, {failed} failed"
+  "progress.apply.summary": "done: {ok} applied, {unverified} unconfirmed, {failed} failed",
+  "cloud.err.cdn_config_rejected": "CDN rejected this configuration change (common causes: HTTPS acceleration off, port 443 not enabled, certificate/domain mismatch, or the domain state forbids changes); check the domain's HTTPS switch and access ports in the console"
 }

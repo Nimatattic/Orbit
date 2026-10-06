@@ -185,3 +185,24 @@ func TestPlanKeepsForeignCurrentCertificateUnresolved(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanTreatsAnyHeldCertificateAsUpToDate(t *testing.T) {
+	// EdgeOne can hold several certificates for one host (for example RSA + SM2),
+	// so "already up to date" must match the whole set, not just the primary one.
+	now := time.Now()
+	certs := []Certificate{{
+		ID: "target", From: "upload", Domain: "api.example.com", SANs: []string{"api.example.com"},
+		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(200 * 24 * time.Hour), Status: 1, Deployable: true,
+	}}
+	resources := []Resource{{
+		Product: ProductTEO, ZoneID: "zone-1", Domain: "api.example.com",
+		BoundMode:    "sslcert",
+		BoundCert:    "other", // primary entry expires sooner
+		BoundCertIDs: []string{"other", "target"},
+	}}
+
+	plan := BuildUpdatePlan(resources, certs, PlanOptions{Account: "demo", Now: now})
+	if plan.Count(KindUpToDate) != 1 || plan.ApplyCount() != 0 {
+		t.Fatalf("a host already holding the target certificate must be up to date, got %+v", plan.Changes)
+	}
+}

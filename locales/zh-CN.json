@@ -182,5 +182,6 @@
   "progress.apply.failed": "  失败：{domain}（{code}）",
   "progress.apply.deploy": "  提交统一部署任务：{count} 个实例",
   "progress.delete.group": "执行删除：{count} 张证书",
-  "progress.apply.summary": "执行完成：成功 {ok}，未确认 {unverified}，失败 {failed}"
+  "progress.apply.summary": "执行完成：成功 {ok}，未确认 {unverified}，失败 {failed}",
+  "cloud.err.cdn_config_rejected": "CDN 拒绝了这次配置变更（常见原因：HTTPS 加速未开启、访问端口 443 未放行、证书与域名不匹配、或域名当前状态不允许变更）；请在控制台核对该域名的 HTTPS 开关与访问端口"
 }
