@@ -317,6 +317,27 @@ func (a *App) report(key string, kv ...any) {
 	}
 }
 
+// userError renders an error the way a person should read it: message keys are
+// translated, and the underlying cause is appended. TUI screens display these
+// strings directly, so raw keys must never reach them.
+func (a *App) userError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var e *exitcode.Error
+	if errors.As(err, &e) {
+		msg := e.Key
+		if a.Bundle != nil {
+			msg = a.Bundle.T(e.Key, e.Args...)
+		}
+		if e.Err != nil {
+			return fmt.Errorf("%s: %w", msg, e.Err)
+		}
+		return errors.New(msg)
+	}
+	return err
+}
+
 // mapProviderErr turns provider sentinels into actionable CLI errors: a cloud
 // failure keeps its raw text but is prefixed with a translated hint.
 func (a *App) mapProviderErr(err error, platform string) error {
@@ -405,6 +426,13 @@ func (a *App) newRootCmd() *cobra.Command {
 		Short:         "orbit",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		// Bare `orbit` opens the overview, which is the most useful default.
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				return exitcode.New(exitcode.Fatal, "err.unknown_command", "value", args[0])
+			}
+			return a.runStatus(cmd.Context())
+		},
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			if err := a.load(); err != nil {
 				return err

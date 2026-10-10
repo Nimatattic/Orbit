@@ -162,48 +162,32 @@ func isCompactWarning(w cloud.ScanWarning) bool {
 	return strings.HasPrefix(w.Code, "UnauthorizedOperation.")
 }
 
-// renderWarnings prints partial-scan warnings to stderr so that machine-readable
-// stdout stays clean. Full detail (hint + raw cloud error) is reserved for
-// warnings that need action; availability failures collapse to "product — code".
-func (a *App) renderWarnings(warnings []cloud.ScanWarning) {
-	// The same availability failure can repeat once per site; collapse those
-	// into a single line with a count so the output stays readable.
+// warningLines renders scan warnings as display lines. Identical availability
+// failures are collapsed into one counted entry so the output stays readable.
+func (a *App) warningLines(warnings []cloud.ScanWarning) []string {
 	counts := map[string]int{}
-	order := make([]string, 0, len(warnings))
 	merged := make([]cloud.ScanWarning, 0, len(warnings))
 	for _, w := range warnings {
-		if !isCompactWarning(w) {
-			merged = append(merged, w)
-			continue
-		}
 		sig := w.Product + "|" + w.Code + "|" + w.Scope
 		if _, seen := counts[sig]; !seen {
-			order = append(order, sig)
 			merged = append(merged, w)
 		}
 		counts[sig]++
 	}
 
-	repeats := map[string]int{}
+	lines := make([]string, 0, len(merged))
 	for _, w := range merged {
-		if !isCompactWarning(w) {
-			continue
-		}
 		sig := w.Product + "|" + w.Code + "|" + w.Scope
-		repeats[sig] = counts[sig]
-	}
-
-	for _, w := range merged {
 		if isCompactWarning(w) {
 			scope := ""
 			if w.Scope != "" {
 				scope = " (" + w.Scope + ")"
 			}
 			line := a.Bundle.T("scan.warning_compact", "product", w.Product, "code", w.Code, "scope", scope)
-			if n := repeats[w.Product+"|"+w.Code+"|"+w.Scope]; n > 1 {
+			if n := counts[sig]; n > 1 {
 				line += fmt.Sprintf(" ×%d", n)
 			}
-			fmt.Fprintln(a.Err, line)
+			lines = append(lines, line)
 			continue
 		}
 		hint := ""
@@ -218,11 +202,23 @@ func (a *App) renderWarnings(warnings []cloud.ScanWarning) {
 				scope = " (" + w.Scope + ")"
 			}
 		}
-		fmt.Fprintln(a.Err, a.Bundle.T("scan.warning",
+		lines = append(lines, a.Bundle.T("scan.warning",
 			"product", w.Product, "scope", scope, "action", w.Action, "code", w.Code, "hint", hint))
+	}
+	return lines
+}
+
+// renderWarnings prints partial-scan warnings to stderr so that machine-readable
+// stdout stays clean. Full detail (hint + raw cloud error) is reserved for
+// warnings that need action; availability failures collapse to "product — code".
+func (a *App) renderWarnings(warnings []cloud.ScanWarning) {
+	for _, line := range a.warningLines(warnings) {
+		fmt.Fprintln(a.Err, line)
+	}
+	for _, w := range warnings {
 		// Informational warnings explain themselves; only blocking ones benefit
 		// from the raw cloud error.
-		if w.Err != nil && !w.Informational {
+		if w.Err != nil && !w.Informational && !isCompactWarning(w) {
 			fmt.Fprintf(a.Err, "    %v\n", w.Err)
 		}
 	}
@@ -257,12 +253,14 @@ func (a *App) updateOptions(account string) (core.PlanOptions, error) {
 }
 
 func (a *App) runUpdate(ctx context.Context) error {
+	// Interactive mode resolves accounts through the picker, so the ambiguity
+	// refusal below must not run first.
+	if a.wantsTUI() {
+		return a.tuiInteractive(ctx, "update")
+	}
 	targets, err := a.accountTargets()
 	if err != nil {
 		return err
-	}
-	if a.wantsTUI() && len(targets) == 1 {
-		return a.tuiUpdate(ctx, targets[0])
 	}
 
 	failures := 0
@@ -324,7 +322,7 @@ func (a *App) runUpdate(ctx context.Context) error {
 	}
 
 	if failures > 0 {
-		return exitcode.New(exitcode.Partial, "doctor.fail")
+		return exitcode.New(exitcode.Partial, "msg.partial")
 	}
 	if a.FailOnChg && !a.Yes {
 		return exitcode.New(exitcode.PendingChanges, "msg.fail_on_changes")
@@ -351,8 +349,8 @@ func (a *App) runClean(ctx context.Context) error {
 		fmt.Fprintln(a.Err, "warning: --permit-partial-scan disables the completeness gate (G2)")
 	}
 
-	if a.wantsTUI() && len(targets) == 1 {
-		return a.tuiClean(ctx, targets[0])
+	if a.wantsTUI() {
+		return a.tuiInteractive(ctx, "clean")
 	}
 
 	failures := 0
@@ -423,7 +421,7 @@ func (a *App) runClean(ctx context.Context) error {
 		failures += countFailures(results)
 	}
 	if failures > 0 {
-		return exitcode.New(exitcode.Partial, "doctor.fail")
+		return exitcode.New(exitcode.Partial, "msg.partial")
 	}
 	return nil
 }
@@ -494,10 +492,30 @@ func backupMetadata(dir, account string, candidates []core.CleanCandidate) error
 	return nil
 }
 
+// statusTargets resolves the accounts to display. Unlike update/clean, looking is
+// harmless, so every registered account is shown by default instead of refusing
+// on ambiguity.
+func (a *App) statusTargets() ([]string, error) {
+	if v := strings.TrimSpace(a.Accounts); v != "" {
+		return splitList(v), nil
+	}
+	aliases := a.knownAliases()
+	if len(aliases) == 0 {
+		if a.Demo {
+			return []string{DemoAccount}, nil
+		}
+		return nil, exitcode.New(exitcode.Fatal, "err.no_accounts")
+	}
+	return aliases, nil
+}
+
 func (a *App) runStatus(ctx context.Context) error {
-	targets, err := a.accountTargets()
+	targets, err := a.statusTargets()
 	if err != nil {
 		return err
+	}
+	if a.wantsTUI() {
+		return a.tuiStatusAndAct(ctx, targets)
 	}
 	type summary struct {
 		Account        string       `json:"account"`
@@ -511,24 +529,32 @@ func (a *App) runStatus(ctx context.Context) error {
 		ForeignCerts   int          `json:"foreign_certs"`
 		Warnings       []warningDTO `json:"warnings,omitempty"`
 	}
-	var out []summary
+	var (
+		out      []summary
+		failures []string
+	)
 
 	for _, account := range targets {
+		// Looking is harmless: one unusable account must not hide the others
+		// (the TUI shows the same per-account error state).
 		provider, err := a.providerFor(account)
 		if err != nil {
-			return err
+			failures = append(failures, fmt.Sprintf("%s: %v", account, a.userError(err)))
+			continue
 		}
 		// status may reuse the cloud's short-lived association cache unless the
 		// operator asks for fresh evidence.
 		inputs, err := a.collect(ctx, provider, account, collectOptions{cachedEvidence: !a.NoCache, needEvidence: true})
 		if err != nil {
-			return err
+			failures = append(failures, fmt.Sprintf("%s: %v", account, a.userError(err)))
+			continue
 		}
 		a.renderWarnings(inputs.warnings)
 		a.report("progress.plan")
 		opts, err := a.updateOptions(account)
 		if err != nil {
-			return err
+			failures = append(failures, fmt.Sprintf("%s: %v", account, a.userError(err)))
+			continue
 		}
 		plan := core.BuildUpdatePlan(inputs.resources, inputs.certs, opts)
 
@@ -563,13 +589,28 @@ func (a *App) runStatus(ctx context.Context) error {
 	}
 
 	if a.JSON {
-		return a.jsonOut(out)
+		if err := a.jsonOut(out); err != nil {
+			return err
+		}
+		for _, f := range failures {
+			fmt.Fprintln(a.Err, f)
+		}
+		if len(failures) > 0 {
+			return exitcode.New(exitcode.Partial, "msg.partial")
+		}
+		return nil
 	}
 	for _, s := range out {
 		fmt.Fprintf(a.Out, "%s: %s\n", a.Bundle.T("account.header"), s.Account)
 		fmt.Fprintf(a.Out, "  certificates: total=%d uploaded=%d in_use=%d unused=%d\n", s.Certificates, s.Uploaded, s.InUse, s.UnusedUploaded)
 		fmt.Fprintf(a.Out, "  resources: total=%d unbound=%d foreign_cert_domains=%d\n", s.Resources, s.Unbound, s.ForeignCerts)
 		fmt.Fprintf(a.Out, "  pending_apply: %d\n", s.PendingApply)
+	}
+	for _, f := range failures {
+		fmt.Fprintln(a.Err, a.Bundle.T("status.account_failed", "error", f))
+	}
+	if len(failures) > 0 {
+		return exitcode.New(exitcode.Partial, "msg.partial")
 	}
 	return nil
 }
@@ -685,12 +726,12 @@ func (a *App) tuiUpdate(ctx context.Context, account string) error {
 		Scan: func(scanCtx context.Context) ([]tui.Item, error) {
 			inputs, err := a.collect(scanCtx, provider, account, collectOptions{})
 			if err != nil {
-				return nil, err
+				return nil, a.userError(err)
 			}
 			a.renderWarnings(inputs.warnings)
 			opts, err := a.updateOptions(account)
 			if err != nil {
-				return nil, err
+				return nil, a.userError(err)
 			}
 			plan = core.BuildUpdatePlan(inputs.resources, inputs.certs, opts)
 			items := make([]tui.Item, 0, plan.ApplyCount())
@@ -732,7 +773,7 @@ func (a *App) tuiUpdate(ctx context.Context, account string) error {
 	plain.Results(a.Out, a.Bundle, outcome.Results)
 	a.reportSummary(outcome.Results)
 	if failures := countFailures(outcome.Results); failures > 0 {
-		return exitcode.New(exitcode.Partial, "doctor.fail")
+		return exitcode.New(exitcode.Partial, "msg.partial")
 	}
 	return nil
 }
@@ -769,11 +810,11 @@ func (a *App) tuiClean(ctx context.Context, account string) error {
 		Scan: func(scanCtx context.Context) ([]tui.Item, error) {
 			inputs, err := a.collect(scanCtx, provider, account, collectOptions{needEvidence: true})
 			if err != nil {
-				return nil, err
+				return nil, a.userError(err)
 			}
 			a.renderWarnings(inputs.warnings)
 			if len(inputs.blocking) > 0 && requireEvidence && !a.PartialScan {
-				return nil, exitcode.New(exitcode.GateRefused, "scan.refused")
+				return nil, a.userError(exitcode.New(exitcode.GateRefused, "scan.refused"))
 			}
 			plan := core.CleanCandidates(inputs.certs, inputs.evidence, inputs.resources, core.CleanOptions{
 				Account:             account,
@@ -828,7 +869,186 @@ func (a *App) tuiClean(ctx context.Context, account string) error {
 	plain.Results(a.Out, a.Bundle, outcome.Results)
 	a.reportSummary(outcome.Results)
 	if failures := countFailures(outcome.Results); failures > 0 {
-		return exitcode.New(exitcode.Partial, "doctor.fail")
+		return exitcode.New(exitcode.Partial, "msg.partial")
+	}
+	return nil
+}
+
+// interactive mode ----------------------------------------------------------
+
+// tuiInteractive resolves the accounts for an interactive update/clean run.
+// Explicit flags win; otherwise a multi-select screen is shown when more than one
+// account is registered. Each selected account then gets its own run view, so the
+// operator confirms per account and never touches one by accident.
+func (a *App) tuiInteractive(ctx context.Context, action string) error {
+	selected, confirmed, err := a.selectAccountsInteractive(ctx, action)
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		fmt.Fprintln(a.Out, a.Bundle.T("tui.cancelled"))
+		return nil
+	}
+	for _, account := range selected {
+		if action == "clean" {
+			err = a.tuiClean(ctx, account)
+		} else {
+			err = a.tuiUpdate(ctx, account)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *App) selectAccountsInteractive(ctx context.Context, action string) ([]string, bool, error) {
+	if v := strings.TrimSpace(a.Accounts); v != "" {
+		return splitList(v), true, nil
+	}
+	all := a.knownAliases()
+	if len(all) == 0 && a.Demo {
+		// --demo works without any configuration.
+		all = []string{DemoAccount}
+	}
+	if len(all) == 0 {
+		return nil, false, exitcode.New(exitcode.Fatal, "err.no_accounts")
+	}
+	if a.AllAccounts || len(all) <= 1 {
+		return all, true, nil
+	}
+
+	detail := make(map[string]string, len(all))
+	for _, name := range all {
+		source, products := "store", a.Loaded.Config.Defaults.Products
+		if acc, ok := a.Loaded.Config.Account(DefaultPlatform, name); ok {
+			if acc.Credential.Source != "" {
+				source = acc.Credential.Source
+			}
+			products = a.Loaded.Config.ProductsFor(acc)
+		}
+		detail[name] = a.Bundle.T("picker.detail", "source", source, "products", strings.Join(products, ", "))
+	}
+
+	titleKey := "picker.title.update"
+	if action == "clean" {
+		titleKey = "picker.title.clean"
+	}
+	return tui.PickAccounts(ctx, a.Bundle, tui.PickerJob{
+		Title:    a.Bundle.T(titleKey),
+		Accounts: all,
+		Detail:   detail,
+	})
+}
+
+// tuiStatusAndAct shows the multi-tab overview; pressing u/c hands over to the
+// corresponding interactive run for the account on screen.
+func (a *App) tuiStatusAndAct(ctx context.Context, accounts []string) error {
+	// The overview owns the screen: provider progress must not print over it.
+	a.progressFn = func(cloud.Progress) {}
+	defer func() { a.progressFn = nil }()
+
+	cfg := a.Loaded.Config
+	olderThanRaw := a.OlderThan
+	if strings.TrimSpace(olderThanRaw) == "" {
+		olderThanRaw = cfg.Defaults.Clean.OlderThan
+	}
+	olderThan, err := config.ParseDuration(olderThanRaw)
+	if err != nil {
+		return exitcode.Wrap(err, exitcode.Fatal, "err.invalid_duration", "value", olderThanRaw)
+	}
+	requireEvidence := cfg.Defaults.Clean.RequireFullEvidence && !a.PartialScan
+
+	scan := func(scanCtx context.Context, account string) (tui.AccountView, error) {
+		provider, err := a.providerFor(account)
+		if err != nil {
+			return tui.AccountView{}, a.userError(err)
+		}
+		products, err := a.products(account)
+		if err != nil {
+			return tui.AccountView{}, a.userError(err)
+		}
+		res, err := provider.Scan(scanCtx, account, cloud.ScanScope{
+			Products:       products,
+			CachedEvidence: !a.NoCache,
+		})
+		if err != nil {
+			return tui.AccountView{}, a.userError(a.mapProviderErr(err, provider.Name()))
+		}
+		opts, err := a.updateOptions(account)
+		if err != nil {
+			return tui.AccountView{}, a.userError(err)
+		}
+		plan := core.BuildUpdatePlan(res.Resources, res.Certificates, opts)
+		clean := core.CleanCandidates(res.Certificates, res.Evidence, res.Resources, core.CleanOptions{
+			Account:             account,
+			Now:                 time.Now(),
+			OlderThan:           olderThan,
+			RequireFullEvidence: requireEvidence,
+			IncludeFree:         a.IncludeFree,
+			ProtectPatterns:     cfg.Defaults.Clean.ProtectPatterns,
+		})
+
+		view := tui.AccountView{
+			Account:   account,
+			Products:  products,
+			Warnings:  a.warningLines(res.Warnings),
+			Total:     len(res.Certificates),
+			Resources: len(res.Resources),
+			ScannedAt: time.Now(),
+		}
+		for _, c := range res.Certificates {
+			if c.IsUploaded() {
+				view.Uploaded++
+			}
+			if ev, ok := res.Evidence[c.ID]; ok && ev.TotalCount > 0 {
+				view.InUse++
+			}
+		}
+		view.Unused = view.Uploaded - view.InUse
+		if view.Unused < 0 {
+			view.Unused = 0
+		}
+		for _, r := range res.Resources {
+			if r.BoundCert == "" {
+				view.Unbound++
+			}
+			if r.BoundForeign {
+				view.Foreign++
+			}
+		}
+		for _, ch := range plan.Pending() {
+			target := ""
+			if ch.To != nil {
+				target = ch.To.ID
+			}
+			view.Pending = append(view.Pending, tui.NewItem(string(ch.Product), ch.Domain, target, ""))
+		}
+		for _, cand := range clean.Candidates {
+			view.Candidates = append(view.Candidates, tui.NewItem("ssl", cand.Cert.Alias, cand.SupersededBy, cand.Cert.ID))
+		}
+		return view, nil
+	}
+
+	outcome, err := tui.RunStatus(ctx, a.Bundle, tui.StatusJob{
+		Title:    a.Bundle.T("status.title"),
+		Accounts: accounts,
+		Scan:     scan,
+	})
+	if err != nil {
+		return err
+	}
+	switch outcome.Action {
+	case "update":
+		if outcome.Account == "" {
+			return nil
+		}
+		return a.tuiUpdate(ctx, outcome.Account)
+	case "clean":
+		if outcome.Account == "" {
+			return nil
+		}
+		return a.tuiClean(ctx, outcome.Account)
 	}
 	return nil
 }

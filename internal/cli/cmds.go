@@ -387,7 +387,7 @@ func (a *App) newAccountTestCmd() *cobra.Command {
 				}
 			}
 			if failed {
-				return exitcode.New(exitcode.Partial, "doctor.fail")
+				return exitcode.New(exitcode.Partial, "msg.partial")
 			}
 			return nil
 		},
@@ -427,7 +427,7 @@ func (a *App) newDoctorCmd() *cobra.Command {
 			plain.Checks(a.Out, a.Bundle, checks)
 			for _, c := range checks {
 				if c.Status == "fail" {
-					return exitcode.New(exitcode.Partial, "doctor.fail")
+					return exitcode.New(exitcode.Partial, "msg.partial")
 				}
 			}
 			return nil

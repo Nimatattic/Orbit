@@ -605,6 +605,18 @@ func (m *Model) fit(s string) string {
 	return strings.Join(out, "\n")
 }
 
+// fitWidth truncates every line to the terminal width (0 leaves it alone).
+func fitWidth(s string, width int) string {
+	if width <= 0 {
+		return strings.TrimRight(s, "\n")
+	}
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	for i, l := range lines {
+		lines[i] = truncate(l, width)
+	}
+	return strings.Join(lines, "\n")
+}
+
 // ------------------------------------------------------------------ helpers
 
 func itemKey(product, domain string) string {
