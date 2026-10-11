@@ -99,6 +99,8 @@ type fakeSSL struct {
 	teoInstances []*ssl.TeoInstanceDetail
 
 	failOnce map[string]error
+	// detail is returned by DescribeCertificateDetail (certificate material).
+	detail *ssl.DescribeCertificateDetailResponse
 }
 
 func (f *fakeSSL) maybeFail(method string) error {
@@ -120,6 +122,18 @@ func (f *fakeSSL) DescribeCertificates(*ssl.DescribeCertificatesRequest) (*ssl.D
 		TotalCount:   common.Uint64Ptr(uint64(len(f.certs))),
 		Certificates: f.certs,
 	}}, nil
+}
+
+func (f *fakeSSL) DescribeCertificateDetail(req *ssl.DescribeCertificateDetailRequest) (*ssl.DescribeCertificateDetailResponse, error) {
+	if err := f.maybeFail("DescribeCertificateDetail"); err != nil {
+		return nil, err
+	}
+	if f.detail == nil {
+		return &ssl.DescribeCertificateDetailResponse{Response: &ssl.DescribeCertificateDetailResponseParams{
+			CertificateId: req.CertificateId,
+		}}, nil
+	}
+	return f.detail, nil
 }
 
 func (f *fakeSSL) CreateCertificateBindResourceSyncTask(*ssl.CreateCertificateBindResourceSyncTaskRequest) (*ssl.CreateCertificateBindResourceSyncTaskResponse, error) {
@@ -1207,5 +1221,49 @@ func TestSharedErrorCodesAreDisambiguatedByMessage(t *testing.T) {
 		"The acceleration service is disabled for this domain.", "req-42")
 	if got := MessageKey(english); got != MsgCDNDomainDisabled {
 		t.Fatalf("english message = %q, want %q", got, MsgCDNDomainDisabled)
+	}
+}
+
+func TestCertificateMaterialMapsDownloadableFields(t *testing.T) {
+	f := &fakeSSL{detail: &ssl.DescribeCertificateDetailResponse{Response: &ssl.DescribeCertificateDetailResponseParams{
+		CertificateId:         common.StringPtr("c-1"),
+		CertificatePublicKey:  common.StringPtr("-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----"),
+		CertificatePrivateKey: common.StringPtr("-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----"),
+		CertFingerprint:       common.StringPtr("AB:CD:EF"),
+		RootCert:              &ssl.RootCertificates{Standard: common.StringPtr("-----BEGIN CERTIFICATE-----\nROOT\n-----END CERTIFICATE-----")},
+	}}}
+	p := testProvider(t, f, &fakeCDN{}, &fakeTEO{})
+
+	mat, err := p.CertificateMaterial(context.Background(), "demo", "c-1")
+	if err != nil {
+		t.Fatalf("material: %v", err)
+	}
+	if !strings.Contains(mat.CertPEM, "BEGIN CERTIFICATE") {
+		t.Fatalf("public certificate missing: %q", mat.CertPEM)
+	}
+	if !strings.Contains(mat.KeyPEM, "BEGIN PRIVATE KEY") {
+		t.Fatalf("private key missing: %q", mat.KeyPEM)
+	}
+	if !strings.Contains(mat.ChainPEM, "ROOT") {
+		t.Fatalf("chain missing: %q", mat.ChainPEM)
+	}
+	if mat.Fingerprint != "AB:CD:EF" {
+		t.Fatalf("fingerprint = %q", mat.Fingerprint)
+	}
+}
+
+func TestCertificateMaterialIsEmptyWhenCloudRefuses(t *testing.T) {
+	// A managed certificate may expose no exportable key at all.
+	f := &fakeSSL{detail: &ssl.DescribeCertificateDetailResponse{Response: &ssl.DescribeCertificateDetailResponseParams{
+		CertificateId: common.StringPtr("c-1"),
+	}}}
+	p := testProvider(t, f, &fakeCDN{}, &fakeTEO{})
+
+	mat, err := p.CertificateMaterial(context.Background(), "demo", "c-1")
+	if err != nil {
+		t.Fatalf("material: %v", err)
+	}
+	if mat.CertPEM != "" || mat.KeyPEM != "" || mat.ChainPEM != "" {
+		t.Fatalf("expected empty material, got %+v", mat)
 	}
 }

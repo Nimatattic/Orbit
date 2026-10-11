@@ -9,6 +9,7 @@ import (
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 	ssl "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl/v20191205"
 
+	"github.com/Crequency/orbit/internal/cloud"
 	"github.com/Crequency/orbit/internal/core"
 )
 
@@ -85,6 +86,34 @@ func toCertificate(item *ssl.Certificates) core.Certificate {
 		cert.Deployable = deployableStates[cert.Status]
 	}
 	return cert
+}
+
+// CertificateMaterial implements cloud.MaterialFetcher: it downloads the public
+// certificate, the private key (when the cloud allows it) and the root chain, so
+// that a deletion can be undone from the backup.
+func (p *Provider) CertificateMaterial(ctx context.Context, _ string, certID string) (cloud.Material, error) {
+	req := ssl.NewDescribeCertificateDetailRequest()
+	req.CertificateId = common.StringPtr(certID)
+
+	resp, err := call(ctx, p.limiters["ssl"], p.opts.MaxAttempts, func() (*ssl.DescribeCertificateDetailResponse, error) {
+		return p.ssl.DescribeCertificateDetail(req)
+	})
+	if err != nil {
+		return cloud.Material{}, withAction(err, p.account, "ssl:DescribeCertificateDetail")
+	}
+	if resp == nil || resp.Response == nil {
+		return cloud.Material{}, nil
+	}
+	r := resp.Response
+	mat := cloud.Material{
+		CertPEM:     str(r.CertificatePublicKey),
+		KeyPEM:      str(r.CertificatePrivateKey),
+		Fingerprint: str(r.CertFingerprint),
+	}
+	if r.RootCert != nil {
+		mat.ChainPEM = str(r.RootCert.Standard)
+	}
+	return mat, nil
 }
 
 // fetchBindings answers "which cloud resources use these certificates" using the

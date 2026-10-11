@@ -20,7 +20,7 @@
 | M0 骨架：CLI、配置分层、凭证存储、i18n、退出码、匹配引擎、清理门禁、fake provider | ✅ 完成 |
 | M1 只读采集：腾讯云 SDK 接入（证书池 / CDN 域名 / EdgeOne 站点域名 / 关联查询） | ✅ 完成（回放测试覆盖；待你用真实账号按 [VERIFY_M1](docs/VERIFY_M1.md) 核对） |
 | M2 匹配引擎打磨（计划渲染、风险分级已可用） | 部分可用 |
-| M3 应用执行（`ModifyDomainConfig` / `ModifyHostsCertificate`） | ◐ 写入与回读复核已实现并测试；审计日志与并发调优待补 |
+| M3 应用执行（`ModifyDomainConfig` / `ModifyHostsCertificate`） | ✅ 写入、异步轮询、回读复核、错误码提示、审计日志、分组并发 |
 | M4 清理执行（删除 + 证书材料备份 + 任务状态分类） | ⏳ 未开始 |
 | M5 TUI（多 Tab、账号多选、计划预览） | ✅ 完成（状态多 Tab 总览、账号多选、计划确认、执行进度与动态等待、`u`/`c` 直达） |
 | M6 交付（打包、cron/systemd、CAM 模板） | ⏳ 未开始 |
@@ -130,6 +130,28 @@ platforms:
 ```
 
 `~/.orbit/` 布局：`config.yaml`、`credentials.yaml`(0600)、`cache/`、`audit/`、`backups/`。
+
+### 审计日志
+
+每次执行（`update --yes`、`clean --yes`，以及 TUI 流程）都会向 `~/.orbit/audit/audit.jsonl` 追加记录：一条变更一行（时间、run_id、命令、账号、产品、域名、策略、变更前后证书 ID、结果 `ok/unverified/failed`、错误码），末尾一条汇总（成功/未确认/失败计数）。文件权限 0600，**从不记录凭证**。用 `jq` 就能查：
+
+```bash
+jq -c 'select(.kind=="change" and .result=="failed")' ~/.orbit/audit/audit.jsonl
+jq -c 'select(.kind=="summary")' ~/.orbit/audit/audit.jsonl | tail -5
+```
+
+### 删除前备份
+
+`clean` 在删除任何证书之前，会在 `~/.orbit/backups/<账号>/<证书ID>-<时间戳>/` 下写入：
+
+| 文件 | 权限 | 内容 |
+| --- | --- | --- |
+| `cert.pem` | 0644 | 服务器证书（如云端允许导出） |
+| `chain.pem` | 0644 | 根证书链（如可得） |
+| `key.pem` | **0600** | 私钥（如云端允许导出；托管证书通常不可导出） |
+| `meta.json` | 0600 | 证书 ID、别名、域名、SAN、到期时间、来源、被谁取代、G2 证据、材料是否导出、run_id |
+
+材料无法导出时**仍会写元数据**并把证书 ID 列出来提示你（design 见 DECISIONS：1Panel 仍是证书源头，元数据是可接受的兜底）。
 
 语言优先级：`--lang` → `ORBIT_LANG` → 配置 `language` → `$LANG` → `zh-CN`。`--json` 输出与错误码**不做翻译**。
 

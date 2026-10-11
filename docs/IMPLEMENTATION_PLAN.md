@@ -707,8 +707,8 @@ CLB（`DescribeListeners` + SNI `Rules` + `ModifyDomainAttributes`）、WAF、AP
 | M0 骨架 | go.mod/Makefile、CLI 骨架、`~/.orbit` 配置、凭证录入与存储、TTY 探测、退出码、`cloud/fake`、i18n 骨架 | `orbit config`、`orbit account add`、`orbit version` 可用 | 2 人日 | ✅ **已完成**（另含匹配引擎与清理门禁，见下） |
 | M1 只读采集 + 参数实测 | 腾讯云 client（限流/分页/Zone 扇出/重试）、证书池、CDN 域名、EdgeOne 站点/域名、绑定关系；完成 §8.6 的参数级实测 | `orbit status --format=json` 有真实数据；服务角色名称与轮询参数确定 | 3 人日 | ✅ **代码完成**（回放测试覆盖）；参数实测待你用真实账号按 [VERIFY_M1](VERIFY_M1.md) 回报 |
 | M2 匹配引擎 | `match` 纯函数 + 选优 + 计划 + 策略/风险 + `ForeignCert` 判定 | `orbit update --dry-run` 输出计划 + 单测 | 2 人日 | ◐ 已随 M0 完成（`internal/core`，含表驱动单测） |
-| M3 应用执行 | S-CDN（Route 局部更新）+ S-TEO（`Mode=sslcert`）、S-UNI 备用、异步轮询、回读复核、错误码处置、审计、幂等 | `orbit update --ssl --yes` 端到端可用 | 3.5 人日 | ◐ 写入/轮询/回读/错误码已完成并测试；审计日志与并发调优待补 |
-| M4 清理 | 关联证据、G1–G4、服务角色检查、备份、二次确认、删除任务状态分类 | `orbit clean --ssl` 安全可用 | 2.5 人日 | ◐ 门禁与候选计算已完成；执行与证书材料备份待做 |
+| M3 应用执行 | S-CDN（Route 局部更新）+ S-TEO（`Mode=sslcert`）、S-UNI 备用、异步轮询、回读复核、错误码处置、审计、幂等 | `orbit update --ssl --yes` 端到端可用 | 3.5 人日 | ✅ **完成** |
+| M4 清理 | 关联证据、G1–G4、服务角色检查、备份、二次确认、删除任务状态分类 | `orbit clean --ssl` 安全可用 | 2.5 人日 | ✅ **完成**（服务角色确切名称待真机确认，V1） |
 | M5 TUI + i18n + 多账号 | 多 Tab、账号多选、计划预览/确认、进度与结果页、zh-CN/en-US 语言包 | `orbit` / `orbit status` TUI 可用 | 4.5 人日 | ✅ **完成**（总览多 Tab、账号多选、计划确认、执行进度与动态等待、`u`/`c` 直达） |
 | M6 交付 | 打包、cron/systemd 示例、README、`doctor`、CAM 模板、真机验收 | 可上线版本 + 文档 | 2 人日 | ◐ README 与 `doctor` 已有；打包与验收待做 |
 | 合计 |  |  | **≈ 19.5 人日** |  |

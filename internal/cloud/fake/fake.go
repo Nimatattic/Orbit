@@ -266,6 +266,17 @@ func (p *Provider) DeleteCertificates(_ context.Context, _ string, certIDs []str
 	return results, nil
 }
 
+// CertificateMaterial implements cloud.MaterialFetcher so that --demo also
+// exercises the backup-before-delete path.
+func (p *Provider) CertificateMaterial(_ context.Context, _ string, certID string) (cloud.Material, error) {
+	return cloud.Material{
+		CertPEM:     "-----BEGIN CERTIFICATE-----\nDEMO " + certID + "\n-----END CERTIFICATE-----\n",
+		KeyPEM:      "-----BEGIN PRIVATE KEY-----\nDEMO\n-----END PRIVATE KEY-----\n",
+		ChainPEM:    "-----BEGIN CERTIFICATE-----\nDEMO ROOT\n-----END CERTIFICATE-----\n",
+		Fingerprint: "DE:MO:" + certID,
+	}, nil
+}
+
 // UploadCertificate implements cloud.Provider (reserved for decision A7).
 func (p *Provider) UploadCertificate(context.Context, string, cloud.LocalCert) (string, error) {
 	return "", cloud.ErrNotImplemented

@@ -226,5 +226,10 @@
   "status.help_no_action": "press q to quit",
   "err.unknown_command": "Unknown command: {value}",
   "status.account_failed": "account scan failed: {error}",
-  "msg.partial": "Some accounts or items failed (see the output above)"
+  "msg.partial": "Some accounts or items failed (see the output above)",
+  "audit.open_failed": "Could not open the audit log (skipped): {error}",
+  "audit.write_failed": "Audit log write failed: {error}",
+  "backup.header": "backing up before deletion: {path}",
+  "backup.done": "backed up {count} certificate(s) ({keys} with private key)",
+  "backup.material_unavailable": "material could not be exported for: {ids} (metadata only)"
 }

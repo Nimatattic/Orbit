@@ -57,6 +57,23 @@ type DeleteOptions struct {
 	CheckBindings bool
 }
 
+// Material is the downloadable content of a certificate. Fields are empty when
+// the cloud refuses to hand them out (for example a managed certificate whose
+// private key is not exportable).
+type Material struct {
+	CertPEM     string
+	KeyPEM      string
+	ChainPEM    string
+	Fingerprint string
+}
+
+// MaterialFetcher is implemented by providers that can export certificate
+// material. It is optional so that a provider which cannot export anything still
+// satisfies Provider; callers type-assert.
+type MaterialFetcher interface {
+	CertificateMaterial(ctx context.Context, account, certID string) (Material, error)
+}
+
 // LocalCert is a certificate material pair, used by the reserved push flow (A7).
 type LocalCert struct {
 	Domain   string

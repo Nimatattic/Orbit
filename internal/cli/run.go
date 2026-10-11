@@ -318,6 +318,7 @@ func (a *App) runUpdate(ctx context.Context) error {
 			plain.Results(a.Out, a.Bundle, results)
 		}
 		a.reportSummary(results)
+		a.auditRun("update", account, "apply", results)
 		failures += countFailures(results)
 	}
 
@@ -397,7 +398,7 @@ func (a *App) runClean(ctx context.Context) error {
 		if dir == "" {
 			dir = config.BackupsDir()
 		}
-		if err := backupMetadata(dir, account, plan.Candidates); err != nil {
+		if err := a.backupCertificates(ctx, dir, account, plan.Candidates, provider); err != nil {
 			return exitcode.Wrap(err, exitcode.Fatal, "err.generic", "error", err)
 		}
 		ids := make([]string, 0, len(plan.Candidates))
@@ -418,6 +419,7 @@ func (a *App) runClean(ctx context.Context) error {
 		} else {
 			plain.Results(a.Out, a.Bundle, results)
 		}
+		a.auditRun("clean", account, "delete", results)
 		failures += countFailures(results)
 	}
 	if failures > 0 {
@@ -460,15 +462,71 @@ func countFailures(results []core.Result) int {
 	return n
 }
 
-// backupMetadata writes one JSON file per candidate before deletion. M4 fills in
-// the certificate material when the SSL API allows downloading it.
-func backupMetadata(dir, account string, candidates []core.CleanCandidate) error {
+// backupCertificates writes one directory per candidate holding the certificate
+// material (when the cloud lets us export it) plus a metadata record. It runs
+// before anything is deleted; a metadata-only backup is the documented fallback
+// when the private key is not exportable.
+func (a *App) backupCertificates(ctx context.Context, dir, account string, candidates []core.CleanCandidate, provider cloud.Provider) error {
+	if len(candidates) == 0 {
+		return nil
+	}
 	target := filepath.Join(dir, account)
 	if err := os.MkdirAll(target, 0o700); err != nil {
 		return err
 	}
+	a.report("backup.header", "path", target)
+
 	stamp := time.Now().Format("20060102T150405")
+	fetcher, canFetch := provider.(cloud.MaterialFetcher)
+	var withoutMaterial []string
+	withKey := 0
+
 	for _, c := range candidates {
+		sub := filepath.Join(target, c.Cert.ID+"-"+stamp)
+		if err := os.MkdirAll(sub, 0o700); err != nil {
+			return err
+		}
+
+		material := map[string]any{"available": false}
+		if canFetch {
+			mat, err := fetcher.CertificateMaterial(ctx, account, c.Cert.ID)
+			switch {
+			case err != nil:
+				material["error"] = a.userError(err).Error()
+			default:
+				files := []string{}
+				if mat.CertPEM != "" {
+					if err := os.WriteFile(filepath.Join(sub, "cert.pem"), []byte(mat.CertPEM), 0o644); err != nil {
+						return err
+					}
+					files = append(files, "cert.pem")
+				}
+				if mat.ChainPEM != "" {
+					if err := os.WriteFile(filepath.Join(sub, "chain.pem"), []byte(mat.ChainPEM), 0o644); err != nil {
+						return err
+					}
+					files = append(files, "chain.pem")
+				}
+				if mat.KeyPEM != "" {
+					// The private key is the sensitive part: 0600, never inherited.
+					if err := os.WriteFile(filepath.Join(sub, "key.pem"), []byte(mat.KeyPEM), 0o600); err != nil {
+						return err
+					}
+					files = append(files, "key.pem")
+					withKey++
+				}
+				material = map[string]any{
+					"available":            len(files) > 0,
+					"files":                files,
+					"fingerprint":          mat.Fingerprint,
+					"private_key_exported": mat.KeyPEM != "",
+				}
+			}
+		}
+		if available, _ := material["available"].(bool); !available {
+			withoutMaterial = append(withoutMaterial, c.Cert.ID)
+		}
+
 		doc := map[string]any{
 			"certificate_id": c.Cert.ID,
 			"alias":          c.Cert.Alias,
@@ -478,16 +536,22 @@ func backupMetadata(dir, account string, candidates []core.CleanCandidate) error
 			"from":           c.Cert.From,
 			"superseded_by":  c.SupersededBy,
 			"evidence":       c.Evidence,
+			"material":       material,
 			"backed_up_at":   time.Now().Format(time.RFC3339),
+			"orbit_run_id":   a.runID,
 		}
 		raw, err := json.MarshalIndent(doc, "", "  ")
 		if err != nil {
 			return err
 		}
-		name := fmt.Sprintf("%s-%s.json", c.Cert.ID, stamp)
-		if err := os.WriteFile(filepath.Join(target, name), raw, 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(sub, "meta.json"), raw, 0o600); err != nil {
 			return err
 		}
+	}
+
+	a.report("backup.done", "count", len(candidates), "keys", withKey)
+	if len(withoutMaterial) > 0 {
+		fmt.Fprintln(a.Err, a.Bundle.T("backup.material_unavailable", "ids", strings.Join(withoutMaterial, ", ")))
 	}
 	return nil
 }
@@ -772,6 +836,7 @@ func (a *App) tuiUpdate(ctx context.Context, account string) error {
 	fmt.Fprintln(a.Out, a.Bundle.T("tui.restored"))
 	plain.Results(a.Out, a.Bundle, outcome.Results)
 	a.reportSummary(outcome.Results)
+	a.auditRun("update", account, "apply", outcome.Results)
 	if failures := countFailures(outcome.Results); failures > 0 {
 		return exitcode.New(exitcode.Partial, "msg.partial")
 	}
@@ -840,7 +905,7 @@ func (a *App) tuiClean(ctx context.Context, account string) error {
 			}
 			// Backup before deleting: the metadata record is the operator's only
 			// trace of what was removed.
-			if err := backupMetadata(dir, account, candidatePlan); err != nil {
+			if err := a.backupCertificates(applyCtx, dir, account, candidatePlan, provider); err != nil {
 				return nil, err
 			}
 			return provider.DeleteCertificates(applyCtx, account, candidateIDs, cloud.DeleteOptions{
@@ -868,6 +933,7 @@ func (a *App) tuiClean(ctx context.Context, account string) error {
 	fmt.Fprintln(a.Out, a.Bundle.T("tui.restored"))
 	plain.Results(a.Out, a.Bundle, outcome.Results)
 	a.reportSummary(outcome.Results)
+	a.auditRun("clean", account, "delete", outcome.Results)
 	if failures := countFailures(outcome.Results); failures > 0 {
 		return exitcode.New(exitcode.Partial, "msg.partial")
 	}

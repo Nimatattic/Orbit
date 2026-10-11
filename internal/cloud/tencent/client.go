@@ -79,6 +79,7 @@ func (o Options) withDefaults() Options {
 // lets tests replay recorded responses without network access.
 type sslAPI interface {
 	DescribeCertificates(*ssl.DescribeCertificatesRequest) (*ssl.DescribeCertificatesResponse, error)
+	DescribeCertificateDetail(*ssl.DescribeCertificateDetailRequest) (*ssl.DescribeCertificateDetailResponse, error)
 	CreateCertificateBindResourceSyncTask(*ssl.CreateCertificateBindResourceSyncTaskRequest) (*ssl.CreateCertificateBindResourceSyncTaskResponse, error)
 	DescribeCertificateBindResourceTaskResult(*ssl.DescribeCertificateBindResourceTaskResultRequest) (*ssl.DescribeCertificateBindResourceTaskResultResponse, error)
 	DescribeHostCdnInstanceList(*ssl.DescribeHostCdnInstanceListRequest) (*ssl.DescribeHostCdnInstanceListResponse, error)

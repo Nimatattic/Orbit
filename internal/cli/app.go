@@ -18,14 +18,17 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Crequency/orbit/internal/audit"
 	"github.com/Crequency/orbit/internal/cloud"
 	"github.com/Crequency/orbit/internal/cloud/fake"
 	"github.com/Crequency/orbit/internal/cloud/tencent"
 	"github.com/Crequency/orbit/internal/config"
+	"github.com/Crequency/orbit/internal/core"
 	"github.com/Crequency/orbit/internal/credential"
 	"github.com/Crequency/orbit/internal/exitcode"
 	"github.com/Crequency/orbit/internal/i18n"
 	"github.com/Crequency/orbit/internal/tty"
+	"github.com/Crequency/orbit/internal/version"
 )
 
 // DefaultPlatform is the only platform this batch implements (decision A3).
@@ -83,9 +86,13 @@ type App struct {
 	// progressSink, when set, receives progress events instead of printing them
 	// (interactive TUI mode).
 	progressSink chan<- cloud.Progress
-	WorkDir      string
-	Home         string
-	Interactive  bool
+	// runID identifies one invocation in the audit log.
+	runID       string
+	auditLog    *audit.Logger
+	auditTried  bool
+	WorkDir     string
+	Home        string
+	Interactive bool
 }
 
 // Execute runs the CLI and returns the process exit code.
@@ -96,7 +103,10 @@ func Execute() int {
 		In:      os.Stdin,
 		WorkDir: ".",
 		Home:    config.Home(),
+		runID:   audit.NewRunID(time.Now()),
 	}
+	defer app.closeAudit()
+
 	root := app.newRootCmd()
 	root.SetOut(app.Out)
 	root.SetErr(app.Err)
@@ -314,6 +324,86 @@ func (a *App) ensureProgress() func(cloud.Progress) {
 func (a *App) report(key string, kv ...any) {
 	if fn := a.ensureProgress(); fn != nil {
 		fn(cloud.Progress{Key: key, Args: kv})
+	}
+}
+
+// auditLogger opens the audit log once. A failure to open it degrades to a
+// warning: losing the log must not block an otherwise valid run.
+func (a *App) auditLogger() *audit.Logger {
+	if a.auditLog != nil || a.auditTried {
+		return a.auditLog
+	}
+	a.auditTried = true
+	logger, err := audit.Open(config.AuditDir())
+	if err != nil {
+		fmt.Fprintln(a.Err, a.Bundle.T("audit.open_failed", "error", err))
+		return nil
+	}
+	a.auditLog = logger
+	return logger
+}
+
+// auditRun records every executed change plus a summary line. Credentials never
+// appear here: only identifiers, decisions and outcomes.
+func (a *App) auditRun(command, account, action string, results []core.Result) {
+	logger := a.auditLogger()
+	if logger == nil || len(results) == 0 {
+		return
+	}
+	var applied, unverified, failed int
+	for _, res := range results {
+		rec := audit.Record{
+			RunID:      a.runID,
+			Version:    version.Version,
+			Kind:       audit.KindChange,
+			Command:    command,
+			Platform:   DefaultPlatform,
+			Account:    account,
+			Action:     action,
+			Product:    string(res.Change.Product),
+			Domain:     res.Change.Domain,
+			Strategy:   string(res.Change.Strategy),
+			Verified:   res.Verified,
+			ErrorCode:  res.ErrCode,
+			MessageKey: res.MessageKey,
+		}
+		if res.Change.To != nil {
+			rec.CertID = res.Change.To.ID
+		}
+		if res.Change.From != nil {
+			rec.FromCert = res.Change.From.ID
+		}
+		switch {
+		case !res.OK:
+			rec.Result = "failed"
+			failed++
+		case !res.Verified:
+			rec.Result = "unverified"
+			unverified++
+		default:
+			rec.Result = "ok"
+			applied++
+		}
+		if res.Err != nil {
+			rec.Error = res.Err.Error()
+		}
+		if err := logger.Write(rec); err != nil {
+			fmt.Fprintln(a.Err, a.Bundle.T("audit.write_failed", "error", err))
+			return
+		}
+	}
+	_ = logger.Write(audit.Record{
+		RunID: a.runID, Version: version.Version, Kind: audit.KindSummary,
+		Command: command, Platform: DefaultPlatform, Account: account, Action: action,
+		Total: len(results), Applied: applied, Unverified: unverified, Failed: failed,
+	})
+}
+
+// closeAudit flushes the log at the end of a run.
+func (a *App) closeAudit() {
+	if a.auditLog != nil {
+		_ = a.auditLog.Close()
+		a.auditLog = nil
 	}
 }
 

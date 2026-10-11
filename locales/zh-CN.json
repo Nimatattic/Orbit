@@ -226,5 +226,10 @@
   "status.help_no_action": "按 q 退出",
   "err.unknown_command": "未知命令：{value}",
   "status.account_failed": "账号扫描失败：{error}",
-  "msg.partial": "部分账号或条目失败（详见上方输出）"
+  "msg.partial": "部分账号或条目失败（详见上方输出）",
+  "audit.open_failed": "无法写入审计日志（已跳过）：{error}",
+  "audit.write_failed": "审计日志写入失败：{error}",
+  "backup.header": "删除前备份：{path}",
+  "backup.done": "已备份 {count} 张证书（含私钥 {keys} 张）",
+  "backup.material_unavailable": "以下证书未能导出材料，仅备份元数据：{ids}"
 }

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -19,10 +21,17 @@ import (
 // stubProvider lets the CLI be exercised without configuration files, real
 // credentials or network access.
 type stubProvider struct {
-	scan      cloud.ScanResult
-	apply     []core.Result
-	delete    []core.Result
-	lastScope cloud.ScanScope
+	scan        cloud.ScanResult
+	apply       []core.Result
+	delete      []core.Result
+	lastScope   cloud.ScanScope
+	material    cloud.Material
+	materialErr error
+}
+
+// CertificateMaterial makes stubProvider a cloud.MaterialFetcher.
+func (s *stubProvider) CertificateMaterial(context.Context, string, string) (cloud.Material, error) {
+	return s.material, s.materialErr
 }
 
 func (s *stubProvider) Name() string                     { return "tencent" }
@@ -307,5 +316,118 @@ func TestCleanProceedsWhenTheOnlyWarningIsOutOfScope(t *testing.T) {
 	}
 	if strings.Contains(app.testErr.String(), "TencentCloudSDKError") {
 		t.Fatalf("informational warnings must not dump the raw cloud error, got %q", app.testErr.String())
+	}
+}
+
+func TestBackupWritesMaterialThenMetadata(t *testing.T) {
+	provider := &stubProvider{material: cloud.Material{
+		CertPEM: "-----BEGIN CERTIFICATE-----", KeyPEM: "-----BEGIN PRIVATE KEY-----",
+		ChainPEM: "-----BEGIN CERTIFICATE-----ROOT", Fingerprint: "AA:BB",
+	}}
+	app := testApp(t, provider)
+	dir := t.TempDir()
+
+	candidates := []core.CleanCandidate{{
+		Cert:         core.Certificate{ID: "c-old", Alias: "1panel-old", Domain: "a.example.com"},
+		SupersededBy: "c-new",
+	}}
+	if err := app.backupCertificates(context.Background(), dir, "main", candidates, provider); err != nil {
+		t.Fatalf("backup: %v", err)
+	}
+
+	entries, err := os.ReadDir(filepath.Join(dir, "main"))
+	if err != nil {
+		t.Fatalf("backup directory missing: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected one backup directory, got %d", len(entries))
+	}
+	sub := filepath.Join(dir, "main", entries[0].Name())
+	for _, name := range []string{"cert.pem", "chain.pem", "key.pem", "meta.json"} {
+		if _, err := os.Stat(filepath.Join(sub, name)); err != nil {
+			t.Errorf("%s should have been written: %v", name, err)
+		}
+	}
+	// The private key is the sensitive file.
+	if info, err := os.Stat(filepath.Join(sub, "key.pem")); err == nil {
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Fatalf("key.pem mode = %04o, want 0600", got)
+		}
+	}
+	meta, err := os.ReadFile(filepath.Join(sub, "meta.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(meta), `"private_key_exported": true`) {
+		t.Fatalf("metadata must record the exported material: %s", meta)
+	}
+	if !strings.Contains(string(meta), "c-new") {
+		t.Fatalf("metadata must record what superseded it: %s", meta)
+	}
+}
+
+func TestBackupFallsBackToMetadataOnly(t *testing.T) {
+	// A managed certificate may not be exportable; the backup must still land.
+	provider := &stubProvider{}
+	app := testApp(t, provider)
+	dir := t.TempDir()
+
+	candidates := []core.CleanCandidate{{Cert: core.Certificate{ID: "c-old", Alias: "x", Domain: "a.example.com"}}}
+	if err := app.backupCertificates(context.Background(), dir, "main", candidates, provider); err != nil {
+		t.Fatalf("backup: %v", err)
+	}
+	entries, _ := os.ReadDir(filepath.Join(dir, "main"))
+	if len(entries) != 1 {
+		t.Fatalf("expected one backup directory, got %d", len(entries))
+	}
+	sub := filepath.Join(dir, "main", entries[0].Name())
+	if _, err := os.Stat(filepath.Join(sub, "meta.json")); err != nil {
+		t.Fatalf("metadata must always be written: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sub, "key.pem")); err == nil {
+		t.Fatal("no private key should be written when the cloud exports none")
+	}
+	if !strings.Contains(app.testErr.String(), "c-old") {
+		t.Fatalf("the operator should be told which certificates lack material, got %q", app.testErr.String())
+	}
+}
+
+func TestAuditRunRecordsChangesAndSummaryWithoutSecrets(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("ORBIT_HOME", home)
+	app := testApp(t, &stubProvider{})
+	app.runID = "run-test"
+
+	results := []core.Result{
+		{Change: core.Change{Product: core.ProductCDN, Domain: "a.example.com", Strategy: core.StrategyProduct,
+			From: &core.CertRef{ID: "c-old"}, To: &core.CertRef{ID: "c-new"}}, OK: true, Verified: true},
+		{Change: core.Change{Product: core.ProductTEO, Domain: "b.example.com", Kind: core.KindApply},
+			OK: true, Verified: false, ErrCode: "Timeout", MessageKey: "cloud.err.verify_failed", Err: errors.New("not confirmed")},
+	}
+	app.auditRun("update", "main", "apply", results)
+	app.closeAudit()
+
+	raw, err := os.ReadFile(filepath.Join(home, "audit", "audit.jsonl"))
+	if err != nil {
+		t.Fatalf("audit log missing: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 2 changes + 1 summary, got %d lines: %s", len(lines), raw)
+	}
+	if !strings.Contains(lines[0], `"from_cert_id":"c-old"`) || !strings.Contains(lines[0], `"cert_id":"c-new"`) {
+		t.Fatalf("change record should carry the before/after ids: %s", lines[0])
+	}
+	if !strings.Contains(lines[1], `"result":"unverified"`) {
+		t.Fatalf("unverified outcome must be recorded: %s", lines[1])
+	}
+	if !strings.Contains(lines[2], `"kind":"summary"`) || !strings.Contains(lines[2], `"applied":1`) {
+		t.Fatalf("summary record is wrong: %s", lines[2])
+	}
+	// Credentials must never reach the log.
+	for _, secret := range []string{"id", "key"} {
+		if strings.Contains(string(raw), `"secret_`+secret) {
+			t.Fatalf("audit log leaked a credential field: %s", raw)
+		}
 	}
 }
