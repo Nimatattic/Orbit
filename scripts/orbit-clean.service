@@ -1,0 +1,12 @@
+# /etc/systemd/system/orbit-clean.service
+[Unit]
+Description=Orbit SSL certificate cleanup (backs up before deleting)
+After=orbit-update.service
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=/etc/orbit/env
+ExecStart=/usr/local/bin/orbit clean --ssl --all-accounts --yes --older-than=7d --json --no-progress
+StandardOutput=append:/var/log/orbit.log
+StandardError=append:/var/log/orbit.log

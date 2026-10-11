@@ -1,0 +1,10 @@
+# /etc/systemd/system/orbit-update.timer
+[Unit]
+Description=Weekly Orbit certificate update
+
+[Timer]
+OnCalendar=Mon 04:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

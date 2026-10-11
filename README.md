@@ -8,6 +8,8 @@
 
 - 方案与选型：[docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)
 - 真机验证步骤（M1）：[docs/VERIFY_M1.md](docs/VERIFY_M1.md)
+- **运维手册（安装 / cron / systemd / 权限 / 回滚 / 排错）**：[docs/OPERATIONS.md](docs/OPERATIONS.md)
+- CAM 最小权限策略（可直接粘贴）：[只读](docs/cam/readonly.json) · [执行](docs/cam/execute.json) · [含删除](docs/cam/delete.json)
 - 腾讯云 API 事实清单（逐条来源 + 待实测项）：[docs/TENCENT_API_NOTES.md](docs/TENCENT_API_NOTES.md)
 - 已确认决策与已接受风险：[DECISIONS.md](DECISIONS.md)
 

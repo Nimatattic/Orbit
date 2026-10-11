@@ -1,0 +1,10 @@
+# /etc/systemd/system/orbit-clean.timer
+[Unit]
+Description=Weekly Orbit certificate cleanup
+
+[Timer]
+OnCalendar=Mon 04:30
+Persistent=true
+
+[Install]
+WantedBy=timers.target

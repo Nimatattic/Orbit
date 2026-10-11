@@ -1,0 +1,17 @@
+# Orbit 定时任务示例 —— 复制到 /etc/cron.d/orbit 并按需修改
+#
+#   1) 先演练：有变更时退出码 3（配合监控告警），不写云端
+#   2) 再执行：--yes 才写云端
+#   3) 最后清理：删除前会自动备份到 $ORBIT_HOME/backups
+#
+# 说明：
+#   --no-progress  日志保持干净（非终端下本来也会自动关闭）
+#   --json         便于日志采集
+#   --all-accounts 多账号批处理必须显式指定账号范围
+SHELL=/bin/bash
+ORBIT_HOME=/root/.orbit
+PATH=/usr/local/bin:/usr/bin:/bin
+
+30 3 * * 1 root orbit update --ssl --all-accounts --dry-run --fail-on-changes --json --no-progress >> /var/log/orbit.log 2>&1
+0  4 * * 1 root orbit update --ssl --all-accounts --yes --json --no-progress >> /var/log/orbit.log 2>&1
+30 4 * * 1 root orbit clean  --ssl --all-accounts --yes --older-than=7d --json --no-progress >> /var/log/orbit.log 2>&1

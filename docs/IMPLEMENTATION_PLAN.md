@@ -710,7 +710,7 @@ CLB（`DescribeListeners` + SNI `Rules` + `ModifyDomainAttributes`）、WAF、AP
 | M3 应用执行 | S-CDN（Route 局部更新）+ S-TEO（`Mode=sslcert`）、S-UNI 备用、异步轮询、回读复核、错误码处置、审计、幂等 | `orbit update --ssl --yes` 端到端可用 | 3.5 人日 | ✅ **完成** |
 | M4 清理 | 关联证据、G1–G4、服务角色检查、备份、二次确认、删除任务状态分类 | `orbit clean --ssl` 安全可用 | 2.5 人日 | ✅ **完成**（服务角色确切名称待真机确认，V1） |
 | M5 TUI + i18n + 多账号 | 多 Tab、账号多选、计划预览/确认、进度与结果页、zh-CN/en-US 语言包 | `orbit` / `orbit status` TUI 可用 | 4.5 人日 | ✅ **完成**（总览多 Tab、账号多选、计划确认、执行进度与动态等待、`u`/`c` 直达） |
-| M6 交付 | 打包、cron/systemd 示例、README、`doctor`、CAM 模板、真机验收 | 可上线版本 + 文档 | 2 人日 | ◐ README 与 `doctor` 已有；打包与验收待做 |
+| M6 交付 | 打包、cron/systemd 示例、README、`doctor`、CAM 模板、真机验收 | 可上线版本 + 文档 | 2 人日 | ✅ 交付完成（`make release` 三平台静态二进制、[OPERATIONS.md](OPERATIONS.md) 运维手册、`docs/cam/` 三档策略、`scripts/` 示例）；**真机验收待用户执行** |
 | 合计 |  |  | **≈ 19.5 人日** |  |
 
 > **M0 实际交付**（略超出原定范围）：`internal/core` 的匹配选优、计划与清理四道闸门已实现并通过单测，因此 M2 与 M4 的核心逻辑提前完成；M0–M2 的"只读可验"目标已达成，可直接进入 M1 接入真实 SDK。

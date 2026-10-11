@@ -1,0 +1,14 @@
+# /etc/systemd/system/orbit-update.service
+[Unit]
+Description=Orbit SSL certificate update
+Documentation=file:/usr/share/doc/orbit/OPERATIONS.md
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+# 凭证通过环境变量注入，避免落盘（配置文件里用 credential.source: env 引用变量名）
+EnvironmentFile=/etc/orbit/env
+ExecStart=/usr/local/bin/orbit update --ssl --all-accounts --yes --json --no-progress
+StandardOutput=append:/var/log/orbit.log
+StandardError=append:/var/log/orbit.log
