@@ -544,6 +544,7 @@ func (a *App) newRootCmd() *cobra.Command {
 	pf.BoolVar(&a.NoCache, "no-cache", false, "")
 
 	root.AddCommand(
+		a.newDashCmd(),
 		a.newStatusCmd(),
 		a.newUpdateCmd(),
 		a.newCleanCmd(),

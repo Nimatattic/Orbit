@@ -769,7 +769,7 @@ func (a *App) wantsTUI() bool {
 
 // tuiUpdate runs `update` interactively: scan, show the plan, ask for
 // confirmation, then apply with live per-change state.
-func (a *App) tuiUpdate(ctx context.Context, account string) error {
+func (a *App) tuiUpdate(ctx context.Context, account string, only map[string]bool) error {
 	events := make(chan cloud.Progress, 512)
 	a.progressSink = events
 	a.progressFn = nil
@@ -797,7 +797,7 @@ func (a *App) tuiUpdate(ctx context.Context, account string) error {
 			if err != nil {
 				return nil, a.userError(err)
 			}
-			plan = core.BuildUpdatePlan(inputs.resources, inputs.certs, opts)
+			plan = filterPlanByKeys(core.BuildUpdatePlan(inputs.resources, inputs.certs, opts), only)
 			items := make([]tui.Item, 0, plan.ApplyCount())
 			for _, ch := range plan.Pending() {
 				target := ""
@@ -845,7 +845,7 @@ func (a *App) tuiUpdate(ctx context.Context, account string) error {
 
 // tuiClean runs `clean` interactively: scan, show the candidates, ask for
 // confirmation, then delete with live per-certificate state.
-func (a *App) tuiClean(ctx context.Context, account string) error {
+func (a *App) tuiClean(ctx context.Context, account string, onlyCerts map[string]bool) error {
 	events := make(chan cloud.Progress, 512)
 	a.progressSink = events
 	a.progressFn = nil
@@ -957,9 +957,9 @@ func (a *App) tuiInteractive(ctx context.Context, action string) error {
 	}
 	for _, account := range selected {
 		if action == "clean" {
-			err = a.tuiClean(ctx, account)
+			err = a.tuiClean(ctx, account, nil)
 		} else {
-			err = a.tuiUpdate(ctx, account)
+			err = a.tuiUpdate(ctx, account, nil)
 		}
 		if err != nil {
 			return err
@@ -1007,13 +1007,29 @@ func (a *App) selectAccountsInteractive(ctx context.Context, action string) ([]s
 	})
 }
 
-// tuiStatusAndAct shows the multi-tab overview; pressing u/c hands over to the
-// corresponding interactive run for the account on screen.
-func (a *App) tuiStatusAndAct(ctx context.Context, accounts []string) error {
-	// The overview owns the screen: provider progress must not print over it.
-	a.progressFn = func(cloud.Progress) {}
-	defer func() { a.progressFn = nil }()
-
+// accountView builds the read-only snapshot both the overview and the console
+// display. It reuses the cloud's association cache: these screens are for
+// looking, not for acting.
+func (a *App) accountView(ctx context.Context, account string) (cloud.Provider, tui.AccountView, error) {
+	provider, err := a.providerFor(account)
+	if err != nil {
+		return nil, tui.AccountView{}, a.userError(err)
+	}
+	products, err := a.products(account)
+	if err != nil {
+		return nil, tui.AccountView{}, a.userError(err)
+	}
+	res, err := provider.Scan(ctx, account, cloud.ScanScope{
+		Products:       products,
+		CachedEvidence: !a.NoCache,
+	})
+	if err != nil {
+		return nil, tui.AccountView{}, a.userError(a.mapProviderErr(err, provider.Name()))
+	}
+	opts, err := a.updateOptions(account)
+	if err != nil {
+		return nil, tui.AccountView{}, a.userError(err)
+	}
 	cfg := a.Loaded.Config
 	olderThanRaw := a.OlderThan
 	if strings.TrimSpace(olderThanRaw) == "" {
@@ -1021,79 +1037,69 @@ func (a *App) tuiStatusAndAct(ctx context.Context, accounts []string) error {
 	}
 	olderThan, err := config.ParseDuration(olderThanRaw)
 	if err != nil {
-		return exitcode.Wrap(err, exitcode.Fatal, "err.invalid_duration", "value", olderThanRaw)
+		return nil, tui.AccountView{}, a.userError(exitcode.Wrap(err, exitcode.Fatal, "err.invalid_duration", "value", olderThanRaw))
 	}
-	requireEvidence := cfg.Defaults.Clean.RequireFullEvidence && !a.PartialScan
+	plan := core.BuildUpdatePlan(res.Resources, res.Certificates, opts)
+	clean := core.CleanCandidates(res.Certificates, res.Evidence, res.Resources, core.CleanOptions{
+		Account:             account,
+		Now:                 time.Now(),
+		OlderThan:           olderThan,
+		RequireFullEvidence: cfg.Defaults.Clean.RequireFullEvidence && !a.PartialScan,
+		IncludeFree:         a.IncludeFree,
+		ProtectPatterns:     cfg.Defaults.Clean.ProtectPatterns,
+	})
+
+	view := tui.AccountView{
+		Account:   account,
+		Products:  products,
+		Warnings:  a.warningLines(res.Warnings),
+		Total:     len(res.Certificates),
+		Resources: len(res.Resources),
+		ScannedAt: time.Now(),
+	}
+	for _, c := range res.Certificates {
+		if c.IsUploaded() {
+			view.Uploaded++
+		}
+		if ev, ok := res.Evidence[c.ID]; ok && ev.TotalCount > 0 {
+			view.InUse++
+		}
+	}
+	view.Unused = view.Uploaded - view.InUse
+	if view.Unused < 0 {
+		view.Unused = 0
+	}
+	for _, r := range res.Resources {
+		if r.BoundCert == "" {
+			view.Unbound++
+		}
+		if r.BoundForeign {
+			view.Foreign++
+		}
+	}
+	for _, ch := range plan.Pending() {
+		target := ""
+		if ch.To != nil {
+			target = ch.To.ID
+		}
+		view.Pending = append(view.Pending, tui.NewItem(string(ch.Product), ch.Domain, target, ""))
+	}
+	for _, cand := range clean.Candidates {
+		view.Candidates = append(view.Candidates, tui.NewItem("ssl", cand.Cert.Alias, cand.SupersededBy, cand.Cert.ID))
+	}
+	return provider, view, nil
+}
+
+// tuiStatusAndAct shows the multi-tab overview; pressing u/c hands over to the
+// corresponding interactive run for the account on screen.
+func (a *App) tuiStatusAndAct(ctx context.Context, accounts []string) error {
+	// The overview owns the screen: provider progress must not print over it.
+	a.progressFn = func(cloud.Progress) {}
+	defer func() { a.progressFn = nil }()
 
 	scan := func(scanCtx context.Context, account string) (tui.AccountView, error) {
-		provider, err := a.providerFor(account)
-		if err != nil {
-			return tui.AccountView{}, a.userError(err)
-		}
-		products, err := a.products(account)
-		if err != nil {
-			return tui.AccountView{}, a.userError(err)
-		}
-		res, err := provider.Scan(scanCtx, account, cloud.ScanScope{
-			Products:       products,
-			CachedEvidence: !a.NoCache,
-		})
-		if err != nil {
-			return tui.AccountView{}, a.userError(a.mapProviderErr(err, provider.Name()))
-		}
-		opts, err := a.updateOptions(account)
-		if err != nil {
-			return tui.AccountView{}, a.userError(err)
-		}
-		plan := core.BuildUpdatePlan(res.Resources, res.Certificates, opts)
-		clean := core.CleanCandidates(res.Certificates, res.Evidence, res.Resources, core.CleanOptions{
-			Account:             account,
-			Now:                 time.Now(),
-			OlderThan:           olderThan,
-			RequireFullEvidence: requireEvidence,
-			IncludeFree:         a.IncludeFree,
-			ProtectPatterns:     cfg.Defaults.Clean.ProtectPatterns,
-		})
-
-		view := tui.AccountView{
-			Account:   account,
-			Products:  products,
-			Warnings:  a.warningLines(res.Warnings),
-			Total:     len(res.Certificates),
-			Resources: len(res.Resources),
-			ScannedAt: time.Now(),
-		}
-		for _, c := range res.Certificates {
-			if c.IsUploaded() {
-				view.Uploaded++
-			}
-			if ev, ok := res.Evidence[c.ID]; ok && ev.TotalCount > 0 {
-				view.InUse++
-			}
-		}
-		view.Unused = view.Uploaded - view.InUse
-		if view.Unused < 0 {
-			view.Unused = 0
-		}
-		for _, r := range res.Resources {
-			if r.BoundCert == "" {
-				view.Unbound++
-			}
-			if r.BoundForeign {
-				view.Foreign++
-			}
-		}
-		for _, ch := range plan.Pending() {
-			target := ""
-			if ch.To != nil {
-				target = ch.To.ID
-			}
-			view.Pending = append(view.Pending, tui.NewItem(string(ch.Product), ch.Domain, target, ""))
-		}
-		for _, cand := range clean.Candidates {
-			view.Candidates = append(view.Candidates, tui.NewItem("ssl", cand.Cert.Alias, cand.SupersededBy, cand.Cert.ID))
-		}
-		return view, nil
+		_, view, err := a.accountView(scanCtx, account)
+		return view, err
 	}
 
 	outcome, err := tui.RunStatus(ctx, a.Bundle, tui.StatusJob{
@@ -1109,12 +1115,56 @@ func (a *App) tuiStatusAndAct(ctx context.Context, accounts []string) error {
 		if outcome.Account == "" {
 			return nil
 		}
-		return a.tuiUpdate(ctx, outcome.Account)
+		return a.tuiUpdate(ctx, outcome.Account, keySet(outcome.Keys))
 	case "clean":
 		if outcome.Account == "" {
 			return nil
 		}
-		return a.tuiClean(ctx, outcome.Account)
+		return a.tuiClean(ctx, outcome.Account, keySet(outcome.Certs))
 	}
 	return nil
+}
+
+// keySet turns a slice into a lookup set (nil when empty, meaning "everything").
+func keySet(items []string) map[string]bool {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(items))
+	for _, item := range items {
+		out[item] = true
+	}
+	return out
+}
+
+// filterPlanByKeys keeps only the selected pending changes. An empty selection
+// means "everything", which keeps `u` without any selection behaving as before.
+func filterPlanByKeys(plan core.Plan, only map[string]bool) core.Plan {
+	if len(only) == 0 {
+		return plan
+	}
+	out := core.Plan{Account: plan.Account, GeneratedAt: plan.GeneratedAt}
+	for _, ch := range plan.Changes {
+		if !ch.NeedsWrite() {
+			continue
+		}
+		if only[strings.ToLower(string(ch.Product)+"|"+ch.Domain)] {
+			out.Changes = append(out.Changes, ch)
+		}
+	}
+	return out
+}
+
+// filterCandidates keeps only the selected cleanup candidates.
+func filterCandidates(candidates []core.CleanCandidate, only map[string]bool) []core.CleanCandidate {
+	if len(only) == 0 {
+		return candidates
+	}
+	out := make([]core.CleanCandidate, 0, len(candidates))
+	for _, c := range candidates {
+		if only[c.Cert.ID] {
+			out = append(out, c)
+		}
+	}
+	return out
 }

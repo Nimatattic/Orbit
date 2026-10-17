@@ -123,39 +123,6 @@ type Model struct {
 	eventsSeen int
 }
 
-type styles struct {
-	title  lipgloss.Style
-	dim    lipgloss.Style
-	ok     lipgloss.Style
-	warn   lipgloss.Style
-	fail   lipgloss.Style
-	active lipgloss.Style
-	box    lipgloss.Style
-}
-
-func newStyles(noColor bool) styles {
-	if noColor {
-		return styles{
-			title:  lipgloss.NewStyle().Bold(true),
-			dim:    lipgloss.NewStyle(),
-			ok:     lipgloss.NewStyle(),
-			warn:   lipgloss.NewStyle(),
-			fail:   lipgloss.NewStyle(),
-			active: lipgloss.NewStyle(),
-			box:    lipgloss.NewStyle(),
-		}
-	}
-	return styles{
-		title:  lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")),
-		dim:    lipgloss.NewStyle().Foreground(lipgloss.Color("241")),
-		ok:     lipgloss.NewStyle().Foreground(lipgloss.Color("42")),
-		warn:   lipgloss.NewStyle().Foreground(lipgloss.Color("214")),
-		fail:   lipgloss.NewStyle().Foreground(lipgloss.Color("203")),
-		active: lipgloss.NewStyle().Foreground(lipgloss.Color("39")),
-		box:    lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("238")).Padding(0, 1),
-	}
-}
-
 func newModel(ctx context.Context, cancel context.CancelFunc, bundle *i18n.Bundle, events <-chan cloud.Progress, job Job, noColor bool) *Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
@@ -445,41 +412,55 @@ func (m *Model) pendingOnly() int {
 
 // View implements tea.Model.
 func (m *Model) View() string {
-	var b strings.Builder
+	width := m.width
+	if width < 40 {
+		width = 100
+	}
 	elapsed := time.Since(m.started)
 	if m.phase == phaseDone && !m.finished.IsZero() {
 		elapsed = m.finished.Sub(m.started)
 	}
 
-	b.WriteString(m.styles.title.Render("Orbit · " + m.job.Title))
-	b.WriteString(m.styles.dim.Render("  " + elapsed.Round(time.Second).String()))
-	b.WriteString("\n")
-
+	head := m.styles.title.Render(m.bundle.T("tui.header", "title", m.job.Title, "elapsed", elapsed.Round(time.Second).String()))
 	for _, line := range m.job.Summary {
-		b.WriteString(m.styles.dim.Render(line))
-		b.WriteString("\n")
+		head += "\n" + m.styles.subtitle.Render(line)
 	}
-	b.WriteString("\n")
+	header := panel(m.styles, "Orbit", head, width, false)
 
 	switch m.phase {
 	case phaseScanning:
-		b.WriteString(m.spinner.View() + " " + m.bundle.T("tui.scanning") + "\n\n")
-		b.WriteString(m.renderScanLog())
+		body := panel(m.styles, m.bundle.T("tui.scanning_panel"),
+			m.spinner.View()+" "+m.bundle.T("tui.scanning")+"\n"+m.renderScanLog(), width, true)
+		return screen(width, m.height, m.footer(), header, body)
+
 	case phaseConfirm:
-		b.WriteString(m.bundle.T("tui.plan_confirm") + "\n\n")
-		b.WriteString(m.renderRows())
-		b.WriteString("\n")
-		b.WriteString(m.styles.active.Render(m.bundle.T("tui.confirm_hint")))
+		rows := panel(m.styles, m.bundle.T("tui.plan_panel", "count", len(m.rows)),
+			m.renderRows(), width, true)
+		hint := m.styles.active.Render(m.bundle.T("tui.confirm_hint"))
+		return screen(width, m.height, hint, header, rows)
+
 	case phaseRunning:
 		ok, unconfirmed, failed, active := m.counts()
-		b.WriteString(m.bundle.T("tui.running",
-			"ok", ok, "unconfirmed", unconfirmed, "failed", failed, "active", active))
-		b.WriteString("\n\n")
-		b.WriteString(m.renderRows())
-	case phaseDone:
-		b.WriteString(m.renderOutcome())
+		done, total := ok+unconfirmed+failed, len(m.rows)
+		bar := progressBar(m.styles, done, total, 28) + "  " + m.styles.dim.Render(fmt.Sprintf("%d/%d", done, total))
+		summary := bar + "  " + m.bundle.T("tui.running",
+			"ok", ok, "unconfirmed", unconfirmed, "failed", failed, "active", active)
+		rows := panel(m.styles, m.bundle.T("tui.plan_panel", "count", len(m.rows)),
+			m.renderRows(), width, true)
+		return screen(width, m.height, m.footer(), header, summary, rows)
+
+	default:
+		body := panel(m.styles, m.bundle.T("tui.result_panel"), m.renderOutcome(), width, true)
+		return screen(width, m.height, m.styles.dim.Render(m.bundle.T("tui.exit_hint")), header, body)
 	}
-	return m.fit(b.String())
+}
+
+// footer is the key legend shown while a run is in flight.
+func (m *Model) footer() string {
+	return keyHints(m.styles, m.width, [][2]string{
+		{"space", m.bundle.T("keys.toggle")},
+		{"q", m.bundle.T("keys.quit")},
+	})
 }
 
 func (m *Model) renderScanLog() string {
@@ -577,7 +558,6 @@ func (m *Model) renderOutcome() string {
 		b.WriteString(m.styles.dim.Render(m.bundle.T("tui.nothing_to_do")) + "\n")
 	}
 	b.WriteString("\n" + m.renderRows())
-	b.WriteString("\n" + m.styles.dim.Render(m.bundle.T("tui.exit_hint")))
 	return b.String()
 }
 
@@ -590,31 +570,6 @@ func (m *Model) maxRows() int {
 		limit = 3
 	}
 	return limit
-}
-
-// fit pads the frame so the alternate screen does not flicker between sizes.
-func (m *Model) fit(s string) string {
-	if m.width <= 0 {
-		return strings.TrimRight(s, "\n")
-	}
-	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
-	out := make([]string, 0, len(lines))
-	for _, l := range lines {
-		out = append(out, truncate(l, m.width))
-	}
-	return strings.Join(out, "\n")
-}
-
-// fitWidth truncates every line to the terminal width (0 leaves it alone).
-func fitWidth(s string, width int) string {
-	if width <= 0 {
-		return strings.TrimRight(s, "\n")
-	}
-	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
-	for i, l := range lines {
-		lines[i] = truncate(l, width)
-	}
-	return strings.Join(lines, "\n")
 }
 
 // ------------------------------------------------------------------ helpers
@@ -644,13 +599,28 @@ func argString(args []any, name string) string {
 	return ""
 }
 
+// truncate cuts s to at most width display columns, appending an ellipsis when
+// something was removed. Width is measured in terminal cells, so CJK text (two
+// cells per rune) is handled correctly.
 func truncate(s string, width int) string {
-	if width <= 0 || len([]rune(s)) <= width {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= width {
 		return s
 	}
-	runes := []rune(s)
-	if width <= 1 {
-		return string(runes[:width])
+	if width == 1 {
+		return "…"
 	}
-	return string(runes[:width-1]) + "…"
+	var b strings.Builder
+	used := 0
+	for _, r := range s {
+		rw := lipgloss.Width(string(r))
+		if used+rw > width-1 {
+			break
+		}
+		b.WriteRune(r)
+		used += rw
+	}
+	return b.String() + "…"
 }

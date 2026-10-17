@@ -57,6 +57,7 @@ orbit account add --alias main      # 交互录入，落 ~/.orbit/credentials.ya
 orbit doctor                        # 配置/凭证/权限/语言包逐项自检
 orbit account test --accounts=main  # 逐产品探测 SSL / CDN / EdgeOne，并显示凭证归属
 orbit                               # 终端下进入总览 TUI（非终端输出文本）
+orbit dash                          # 交互式总控台：选账号 → 应用/清理/总览/自检
 ```
 
 ## 5. cron 用法

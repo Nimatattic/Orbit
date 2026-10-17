@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -175,5 +176,160 @@ func TestPickerCancel(t *testing.T) {
 	m = next.(*pickerModel)
 	if !m.cancel || cmd == nil {
 		t.Fatal("esc must cancel the picker")
+	}
+}
+
+func statusItemsModel(t *testing.T) *statusModel {
+	t.Helper()
+	m := testStatusModel(t, []string{"main"}, nil)
+	next, _ := m.Update(accountScannedMsg{account: "main", view: AccountView{
+		Account: "main",
+		Pending: []Item{
+			NewItem("cdn", "a.example.com", "c-new", ""),
+			NewItem("cdn", "b.example.com", "c-new", ""),
+			NewItem("teo", "c.example.com", "c-new", ""),
+		},
+		Candidates: []Item{
+			NewItem("ssl", "old-cert", "c-new", "c-old"),
+		},
+	}})
+	return next.(*statusModel)
+}
+
+func TestStatusCursorMovesWithinFocusedSection(t *testing.T) {
+	m := statusItemsModel(t)
+
+	next, _ := m.Update(key("down"))
+	m = next.(*statusModel)
+	if got := m.currentState().cursor[sectionPending]; got != 1 {
+		t.Fatalf("cursor = %d, want 1", got)
+	}
+	next, _ = m.Update(key("down"))
+	next, _ = next.(*statusModel).Update(key("down")) // must clamp at the last row
+	m = next.(*statusModel)
+	if got := m.currentState().cursor[sectionPending]; got != 2 {
+		t.Fatalf("cursor should clamp to the last row, got %d", got)
+	}
+	next, _ = m.Update(key("up"))
+	m = next.(*statusModel)
+	if got := m.currentState().cursor[sectionPending]; got != 1 {
+		t.Fatalf("cursor = %d, want 1", got)
+	}
+
+	// Switching the section gives the candidate list its own cursor.
+	next, _ = m.Update(key("s"))
+	m = next.(*statusModel)
+	if m.focus != sectionCandidates {
+		t.Fatalf("focus = %d, want candidates", m.focus)
+	}
+	if got := m.currentState().cursor[sectionCandidates]; got != 0 {
+		t.Fatalf("the candidate cursor starts at 0, got %d", got)
+	}
+}
+
+func TestStatusSpaceTogglesAndBulkKeys(t *testing.T) {
+	m := statusItemsModel(t)
+
+	next, _ := m.Update(key(" "))
+	m = next.(*statusModel)
+	sel := m.currentState().selectedItems(sectionPending)
+	if len(sel) != 1 || sel[0].Domain != "a.example.com" {
+		t.Fatalf("space must select the row under the cursor, got %v", sel)
+	}
+
+	next, _ = m.Update(key("a"))
+	m = next.(*statusModel)
+	if got := len(m.currentState().selectedItems(sectionPending)); got != 3 {
+		t.Fatalf("'a' must select all pending rows, got %d", got)
+	}
+
+	next, _ = m.Update(key("n"))
+	m = next.(*statusModel)
+	if got := len(m.currentState().selectedItems(sectionPending)); got != 0 {
+		t.Fatalf("'n' must clear the selection, got %d", got)
+	}
+
+	// Selection is per section: selecting a candidate must not touch pending.
+	next, _ = m.Update(key("s"))
+	m = next.(*statusModel)
+	next, _ = m.Update(key(" "))
+	m = next.(*statusModel)
+	if got := len(m.currentState().selectedItems(sectionCandidates)); got != 1 {
+		t.Fatalf("candidate selection failed, got %d", got)
+	}
+	if got := len(m.currentState().selectedItems(sectionPending)); got != 0 {
+		t.Fatalf("pending selection must stay empty, got %d", got)
+	}
+}
+
+func TestStatusApplyCarriesTheSelection(t *testing.T) {
+	m := statusItemsModel(t)
+
+	// Select the first two pending rows.
+	next, _ := m.Update(key(" "))
+	m = next.(*statusModel)
+	next, _ = m.Update(key("down"))
+	m = next.(*statusModel)
+	next, _ = m.Update(key(" "))
+	m = next.(*statusModel)
+
+	next, cmd := m.Update(key("u"))
+	m = next.(*statusModel)
+	if cmd == nil || m.outcome.Action != "update" || m.outcome.Account != "main" {
+		t.Fatalf("outcome = %+v", m.outcome)
+	}
+	if len(m.outcome.Keys) != 2 {
+		t.Fatalf("expected two selected keys, got %v", m.outcome.Keys)
+	}
+	for _, want := range []string{"cdn|a.example.com", "cdn|b.example.com"} {
+		found := false
+		for _, got := range m.outcome.Keys {
+			if got == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("missing key %q in %v", want, m.outcome.Keys)
+		}
+	}
+
+	// Without a selection the outcome stays empty, which the CLI reads as "all".
+	next, _ = m.Update(key("n"))
+	m = next.(*statusModel)
+	next, _ = m.Update(key("u"))
+	m = next.(*statusModel)
+	if len(m.outcome.Keys) != 0 {
+		t.Fatalf("an empty selection must stay empty, got %v", m.outcome.Keys)
+	}
+}
+
+func TestStatusCleanupCarriesSelectedCertIDs(t *testing.T) {
+	m := statusItemsModel(t)
+	next, _ := m.Update(key("s")) // focus the candidate list
+	m = next.(*statusModel)
+	next, _ = m.Update(key(" "))
+	m = next.(*statusModel)
+
+	next, cmd := m.Update(key("c"))
+	m = next.(*statusModel)
+	if cmd == nil || m.outcome.Action != "clean" {
+		t.Fatalf("outcome = %+v", m.outcome)
+	}
+	if len(m.outcome.Certs) != 1 || m.outcome.Certs[0] != "c-old" {
+		t.Fatalf("certs = %v, want [c-old]", m.outcome.Certs)
+	}
+}
+
+func TestStatusViewRendersPanelsAndFooter(t *testing.T) {
+	m := statusItemsModel(t)
+	m.width, m.height = 90, 30
+	out := m.View()
+	for _, want := range []string{"Orbit · status", "▸", "to apply", "cleanup candidates", "space"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("view is missing %q:\n%s", want, out)
+		}
+	}
+	if lines := strings.Split(out, "\n"); len(lines) != 30 {
+		t.Fatalf("view must fill the screen height, got %d lines", len(lines))
 	}
 }
