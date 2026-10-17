@@ -93,3 +93,27 @@ func TestFromEnvPrecedence(t *testing.T) {
 		t.Fatalf("configured language should apply, got %q", got)
 	}
 }
+
+func TestFromEnvIgnoresNeutralPosixLocales(t *testing.T) {
+	// LC_ALL=C is what cron and systemd hand us; it means "no preference", so the
+	// decision must fall through to LANG instead of forcing the fallback language.
+	t.Setenv("ORBIT_LANG", "")
+	t.Setenv("LC_ALL", "C.UTF-8")
+	t.Setenv("LC_MESSAGES", "")
+	t.Setenv("LANG", "en_US.UTF-8")
+	if got := FromEnv("", ""); got != "en-US" {
+		t.Fatalf("FromEnv = %q, want en-US (LC_ALL=C must not pin the language)", got)
+	}
+
+	// An explicit request still wins over everything.
+	if got := FromEnv("zh-CN", "en-US"); got != "zh-CN" {
+		t.Fatalf("explicit --lang must win, got %q", got)
+	}
+
+	// With no usable preference at all we keep the documented fallback.
+	t.Setenv("LANG", "")
+	t.Setenv("LC_ALL", "POSIX")
+	if got := FromEnv("", ""); got != Fallback {
+		t.Fatalf("FromEnv = %q, want %q", got, Fallback)
+	}
+}

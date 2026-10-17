@@ -327,6 +327,27 @@ func (a *App) report(key string, kv ...any) {
 	}
 }
 
+// helpBundle resolves just enough language to translate help text. It mirrors
+// load()'s precedence (--lang, then config, then the environment) but never
+// touches credentials, so `orbit --help` works in any environment.
+func (a *App) helpBundle(cmd *cobra.Command) *i18n.Bundle {
+	lang := a.Lang
+	if lang == "" {
+		if f := cmd.Flags().Lookup("lang"); f != nil {
+			lang = f.Value.String()
+		}
+	}
+	fromConfig := ""
+	if a.Loaded != nil {
+		fromConfig = a.Loaded.Config.Language
+	}
+	bundle, err := i18n.New(i18n.FromEnv(lang, fromConfig))
+	if err != nil {
+		bundle, _ = i18n.New("en-US")
+	}
+	return bundle
+}
+
 // auditLogger opens the audit log once. A failure to open it degrades to a
 // warning: losing the log must not block an otherwise valid run.
 func (a *App) auditLogger() *audit.Logger {
@@ -542,6 +563,16 @@ func (a *App) newRootCmd() *cobra.Command {
 	pf.BoolVar(&a.Progress, "progress", false, "")
 	pf.BoolVar(&a.NoProgress, "no-progress", false, "")
 	pf.BoolVar(&a.NoCache, "no-cache", false, "")
+
+	// Cobra renders --help before PersistentPreRunE runs, so help text has to be
+	// translated here; otherwise the tree shows raw message keys.
+	defaultHelp := root.HelpFunc()
+	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		if bundle := a.helpBundle(cmd); bundle != nil {
+			localize(root, bundle)
+		}
+		defaultHelp(cmd, args)
+	})
 
 	root.AddCommand(
 		a.newDashCmd(),

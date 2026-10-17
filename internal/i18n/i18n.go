@@ -65,14 +65,28 @@ func Negotiate(prefer string) string {
 	return supported[idx]
 }
 
-// FromEnv implements the documented precedence: explicit > ORBIT_LANG > $LANG.
+// FromEnv implements the documented precedence:
+// explicit > ORBIT_LANG > config > LC_ALL > LC_MESSAGES > LANG.
 func FromEnv(explicit, fromConfig string) string {
 	for _, candidate := range []string{explicit, os.Getenv("ORBIT_LANG"), fromConfig, os.Getenv("LC_ALL"), os.Getenv("LC_MESSAGES"), os.Getenv("LANG")} {
-		if strings.TrimSpace(candidate) != "" {
-			return Negotiate(candidate)
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || isNeutralLocale(candidate) {
+			continue
 		}
+		return Negotiate(candidate)
 	}
 	return Fallback
+}
+
+// isNeutralLocale reports POSIX placeholders that carry no language preference.
+// LC_ALL=C (or C.UTF-8) is the norm under cron, systemd and CI; treating it as a
+// real request would silently pin the language to the fallback and ignore $LANG.
+func isNeutralLocale(s string) bool {
+	switch strings.ToUpper(normaliseLocale(s)) {
+	case "C", "POSIX":
+		return true
+	}
+	return false
 }
 
 // New builds a bundle for prefer, always keeping the fallback catalog at hand.

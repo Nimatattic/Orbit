@@ -17,6 +17,7 @@ var commandKeys = map[string]string{
 	"config":  "config.short",
 	"doctor":  "doctor.short",
 	"version": "version.short",
+	"dash":    "cmd.dash.short",
 	"list":    "account.list.short",
 	"add":     "account.add.short",
 	"remove":  "account.remove.short",
@@ -24,6 +25,12 @@ var commandKeys = map[string]string{
 	"show":    "config.show.short",
 	"path":    "config.path.short",
 	"set":     "config.set.short",
+}
+
+// commandLongKeys maps command names to a long description key for the commands
+// that carry one.
+var commandLongKeys = map[string]string{
+	"dash": "cmd.dash.long",
 }
 
 // flagKeys maps flag names to message keys.
@@ -60,6 +67,9 @@ func localize(cmd *cobra.Command, b *i18n.Bundle) {
 	}
 	if key, ok := commandKeys[cmd.Name()]; ok {
 		cmd.Short = b.T(key)
+	}
+	if key, ok := commandLongKeys[cmd.Name()]; ok {
+		cmd.Long = b.T(key)
 	}
 	applyFlagUsage(cmd.Flags(), b)
 	applyFlagUsage(cmd.PersistentFlags(), b)
