@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Crequency/orbit/internal/i18n"
@@ -331,5 +334,144 @@ func TestGuideInitialSelectionFromFlags(t *testing.T) {
 	}
 	if m.scope != 1 {
 		t.Fatalf("scope = %d, want the apply level", m.scope)
+	}
+}
+
+func TestGuideSavePromptWritesThePolicy(t *testing.T) {
+	dir := t.TempDir()
+	job := testGuideJob()
+	job.PolicyJSON = func([]string, string, bool) string { return "{\n  \"version\": \"2.0\"\n}\n" }
+	job.SaveDefault = "./orbit-account-policy.json"
+
+	bundle, _ := i18n.New("en-US")
+	m := newGuideModel(bundle, job, true)
+	m.width, m.height = 100, 34
+
+	// `w` only means something inside the policy view.
+	next, _ := m.Update(key("w"))
+	m = next.(*guideModel)
+	if m.saving {
+		t.Fatal("w must not open the prompt outside the policy view")
+	}
+
+	next, _ = m.Update(key("p"))
+	m = next.(*guideModel)
+	next, _ = m.Update(key("w"))
+	m = next.(*guideModel)
+	if !m.saving {
+		t.Fatal("w must open the path prompt in the policy view")
+	}
+	if got := m.input.Value(); got != "./orbit-account-policy.json" {
+		t.Fatalf("default path = %q, want ./orbit-account-policy.json", got)
+	}
+
+	// Type an absolute path and save.
+	target := filepath.Join(dir, "sub", "policy.json")
+	m.input.SetValue(target)
+	next, _ = m.Update(key("enter"))
+	m = next.(*guideModel)
+	if m.saving {
+		t.Fatalf("a successful save must close the prompt (err=%q)", m.saveErr)
+	}
+	written, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("the policy should have been written to %s: %v", target, err)
+	}
+	if !strings.Contains(string(written), `"version": "2.0"`) {
+		t.Fatalf("file content is wrong: %s", written)
+	}
+	if !strings.Contains(m.saveMsg, target) {
+		t.Fatalf("confirmation should name the file: %q", m.saveMsg)
+	}
+	if info, err := os.Stat(target); err == nil && info.Mode().Perm() != 0o600 {
+		t.Fatalf("policy mode = %04o, want 0600", info.Mode().Perm())
+	}
+}
+
+func TestGuideSavePathDirectoryAndTilde(t *testing.T) {
+	dir := t.TempDir()
+	job := testGuideJob()
+	job.PolicyJSON = func([]string, string, bool) string { return "{}" }
+
+	bundle, _ := i18n.New("en-US")
+	m := newGuideModel(bundle, job, true)
+	next, _ := m.Update(key("p"))
+	m = next.(*guideModel)
+	next, _ = m.Update(key("w"))
+	m = next.(*guideModel)
+
+	// A trailing separator means "save into this directory" with the default name.
+	m.input.SetValue(dir + "/")
+	next, _ = m.Update(key("enter"))
+	m = next.(*guideModel)
+	if m.saveErr != "" {
+		t.Fatalf("saving into a directory failed: %v", m.saveErr)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "orbit-account-policy.json")); err != nil {
+		t.Fatalf("the default file name should be used inside a directory: %v", err)
+	}
+
+	// An existing directory without a separator behaves the same way.
+	m.input.SetValue(dir)
+	m.startSaving()
+	m.input.SetValue(dir)
+	next, _ = m.Update(key("enter"))
+	m = next.(*guideModel)
+	if m.saveErr != "" {
+		t.Fatalf("saving into an existing directory failed: %v", m.saveErr)
+	}
+
+	// ~ expands to the home directory.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory")
+	}
+	got, err := resolveSavePath("~/x.json", "def.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != filepath.Join(home, "x.json") {
+		t.Fatalf("~ did not expand: %q", got)
+	}
+}
+
+func TestGuideSavePromptCancelsAndKeepsErrors(t *testing.T) {
+	job := testGuideJob()
+	job.PolicyJSON = func([]string, string, bool) string { return "{}" }
+
+	bundle, _ := i18n.New("en-US")
+	m := newGuideModel(bundle, job, true)
+	next, _ := m.Update(key("p"))
+	m = next.(*guideModel)
+	next, _ = m.Update(key("w"))
+	m = next.(*guideModel)
+
+	// While the prompt is open the key goes into the input, so a path may
+	// contain q, p or w without quitting or toggling anything.
+	m.input.SetValue("")
+	for _, r := range "/tmp/qpw.json" {
+		next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = next.(*guideModel)
+	}
+	if !m.saving || !m.showPolicy {
+		t.Fatalf("typing must not leave the prompt: saving=%v policy=%v", m.saving, m.showPolicy)
+	}
+	if got := m.input.Value(); got != "/tmp/qpw.json" {
+		t.Fatalf("input = %q", got)
+	}
+
+	// An empty path is refused without leaving the prompt.
+	m.input.SetValue("   ")
+	next, _ = m.Update(key("enter"))
+	m = next.(*guideModel)
+	if !m.saving || m.saveErr == "" {
+		t.Fatalf("an empty path must be refused, saving=%v err=%q", m.saving, m.saveErr)
+	}
+
+	// Esc closes the prompt and reports nothing.
+	next, _ = m.Update(key("esc"))
+	m = next.(*guideModel)
+	if m.saving || m.saveErr != "" {
+		t.Fatalf("esc must close the prompt cleanly: saving=%v err=%q", m.saving, m.saveErr)
 	}
 }

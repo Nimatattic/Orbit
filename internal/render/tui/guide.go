@@ -2,10 +2,13 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/Crequency/orbit/internal/i18n"
@@ -62,6 +65,8 @@ type GuideJob struct {
 	PolicyName func(products []string, scopeID string) string
 	// PolicySteps are the console steps, already localised.
 	PolicySteps []string
+	// SaveDefault is the path offered when the operator saves the policy.
+	SaveDefault string
 	// ServiceRole is the linked role the write/delete scopes need.
 	ServiceRole string
 	// PolicyHint tells the operator where a paste-ready policy lives.
@@ -90,6 +95,12 @@ type guideModel struct {
 	policyScroll  int
 	showPolicy    bool
 
+	input     textinput.Model
+	saving    bool
+	savedPath string
+	saveMsg   string
+	saveErr   string
+
 	focus  int
 	width  int
 	height int
@@ -113,9 +124,20 @@ func newGuideModel(bundle *i18n.Bundle, job GuideJob, noColor bool) *guideModel 
 			products[p.ID] = wanted[p.ID] || p.Required
 		}
 	}
+	saveDefault := job.SaveDefault
+	if saveDefault == "" {
+		saveDefault = defaultPolicyFile
+	}
+	input := textinput.New()
+	input.Placeholder = saveDefault
+	input.SetValue(saveDefault)
+	input.CharLimit = 512
+	input.Prompt = "> "
+	input.Width = 60
+
 	m := &guideModel{
 		bundle: bundle, job: job, products: products,
-		width: 100, styles: newStyles(noColor),
+		width: 100, styles: newStyles(noColor), input: input,
 	}
 	for i, s := range job.Scopes {
 		if s.ID == job.InitialScope {
@@ -133,10 +155,28 @@ func (m *guideModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.input.Width = clamp(msg.Width-24, 20, 120)
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.saving {
+			return m.updateSaving(msg)
+		}
 		switch msg.String() {
+		case "p":
+			m.showPolicy = !m.showPolicy
+			if m.showPolicy {
+				m.focus = guideSectionPolicy
+				m.policyScroll = 0
+			} else if m.focus == guideSectionPolicy {
+				m.focus = guideSectionList
+			}
+			return m, nil
+		case "w":
+			if m.showPolicy {
+				m.startSaving()
+			}
+			return m, nil
 		case "ctrl+c", "q":
 			return m, tea.Quit
 		case "esc":
@@ -153,15 +193,6 @@ func (m *guideModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "shift+tab":
 			m.cycleFocus(-1)
-			return m, nil
-		case "p":
-			m.showPolicy = !m.showPolicy
-			if m.showPolicy {
-				m.focus = guideSectionPolicy
-				m.policyScroll = 0
-			} else if m.focus == guideSectionPolicy {
-				m.focus = guideSectionList
-			}
 			return m, nil
 		case "up", "k":
 			m.move(-1)
@@ -261,7 +292,11 @@ func (m *guideModel) View() string {
 		// configuration panels.
 		steps := panel(m.styles, m.bundle.T("guide.policy_steps"),
 			strings.Join(m.job.PolicySteps, "\n"), width, false)
-		return screen(width, m.height, m.policyFooter(), header, steps, m.policyPanel(width))
+		blocks := []string{header, steps, m.policyPanel(width)}
+		if save := m.savePanel(width); save != "" {
+			blocks = append(blocks, save)
+		}
+		return screen(width, m.height, m.policyFooter(), blocks...)
 	}
 
 	perms := m.permissions()
@@ -476,6 +511,9 @@ func (m *guideModel) policyRows() int {
 	}
 	// header(3) + steps(3+lines) + policy borders(2) + footer(1)
 	rows := m.height - 9 - len(m.job.PolicySteps)
+	if m.saving || m.saveMsg != "" || m.saveErr != "" {
+		rows -= 4 // the save panel
+	}
 	if rows < 4 {
 		rows = 4
 	}
@@ -510,10 +548,122 @@ func (m *guideModel) listRows() int {
 	return rows
 }
 
+// defaultPolicyFile is the offered file name when saving the policy.
+const defaultPolicyFile = "orbit-account-policy.json"
+
+// startSaving opens the path prompt, pre-filled with the default (or the path
+// used before, which is what an operator repeating the action expects).
+func (m *guideModel) startSaving() {
+	if m.savedPath != "" {
+		m.input.SetValue(m.savedPath)
+	} else if strings.TrimSpace(m.input.Value()) == "" {
+		m.input.SetValue(defaultPolicyFile)
+	}
+	m.input.CursorEnd()
+	m.input.Focus()
+	m.saving = true
+	m.saveErr = ""
+	m.saveMsg = ""
+}
+
+// updateSaving handles keys while the path prompt is open: everything goes to the
+// input so paths containing q/p/w can be typed.
+func (m *guideModel) updateSaving(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		m.saving = false
+		m.input.Blur()
+		m.saveErr = ""
+		return m, nil
+	case "enter":
+		if err := m.savePolicy(); err != nil {
+			m.saveErr = err.Error()
+			m.saveMsg = ""
+			return m, nil
+		}
+		m.saving = false
+		m.input.Blur()
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	m.saveErr = ""
+	return m, cmd
+}
+
+// savePolicy writes the JSON to the entered path.
+func (m *guideModel) savePolicy() error {
+	raw := strings.TrimSpace(m.input.Value())
+	if raw == "" {
+		return errors.New(m.bundle.T("guide.save_empty"))
+	}
+	target, err := resolveSavePath(raw, defaultPolicyFile)
+	if err != nil {
+		return err
+	}
+	if dir := filepath.Dir(target); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	// The policy is not a credential, but it does describe the account's access
+	// posture, so it is written 0600 like the other generated artefacts.
+	if err := os.WriteFile(target, []byte(m.policyText()), 0o600); err != nil {
+		return err
+	}
+	m.savedPath = target
+	m.saveMsg = m.bundle.T("guide.saved", "path", target)
+	return nil
+}
+
+// resolveSavePath turns operator input into an absolute file path. A trailing
+// separator (or an existing directory) means "save into this directory".
+func resolveSavePath(raw, defaultName string) (string, error) {
+	if strings.HasPrefix(raw, "~/") || raw == "~" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		raw = filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(raw, "~"), string(os.PathSeparator)))
+	}
+	if strings.HasSuffix(raw, string(os.PathSeparator)) {
+		raw = filepath.Join(raw, defaultName)
+	} else if info, err := os.Stat(raw); err == nil && info.IsDir() {
+		raw = filepath.Join(raw, defaultName)
+	}
+	return filepath.Abs(raw)
+}
+
+// savePanel renders the path prompt or the result of the last save.
+func (m *guideModel) savePanel(width int) string {
+	switch {
+	case m.saving:
+		body := m.styles.active.Render(m.bundle.T("guide.save_prompt")) + " " + m.input.View()
+		if m.saveErr != "" {
+			body += "\n" + m.styles.fail.Render(m.saveErr)
+		}
+		return panel(m.styles, m.bundle.T("guide.save_title"), body, width, true)
+	case m.saveMsg != "":
+		return panel(m.styles, m.bundle.T("guide.save_title"), m.styles.ok.Render(m.saveMsg), width, false)
+	case m.saveErr != "":
+		return panel(m.styles, m.bundle.T("guide.save_title"), m.styles.fail.Render(m.saveErr), width, false)
+	}
+	return ""
+}
+
 // policyFooter describes the policy view keys.
 func (m *guideModel) policyFooter() string {
+	if m.saving {
+		return keyHints(m.styles, m.windowWidth(), [][2]string{
+			{"enter", m.bundle.T("keys.save_confirm")},
+			{"esc", m.bundle.T("keys.cancel")},
+		})
+	}
 	return keyHints(m.styles, m.windowWidth(), [][2]string{
 		{"↑/↓", m.bundle.T("keys.move")},
+		{"w", m.bundle.T("keys.save")},
 		{"p", m.bundle.T("keys.back")},
 		{"q", m.bundle.T("keys.quit")},
 	})

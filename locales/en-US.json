@@ -332,5 +332,11 @@
   "keys.show_policy": "show policy JSON",
   "keys.hide_policy": "hide policy JSON",
   "guide.policy_steps": "how to paste",
-  "keys.back": "back to the guide"
+  "keys.back": "back to the guide",
+  "guide.save_title": "save to file",
+  "guide.save_prompt": "path (enter to save):",
+  "guide.saved": "saved to {path}",
+  "guide.save_empty": "the path cannot be empty",
+  "keys.save": "save to file",
+  "keys.save_confirm": "save"
 }

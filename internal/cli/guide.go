@@ -22,6 +22,9 @@ var guideScopes = []struct{ ID, LabelKey, NoteKey string }{
 	{"full", "guide.scope.full", "guide.scope.full_note"},
 }
 
+// guidePolicyFile is the default file name offered by the save prompt.
+const guidePolicyFile = "orbit-account-policy.json"
+
 // guideProducts are the product scopes, certificate inventory first.
 var guideProducts = []struct {
 	ID, LabelKey, Scope string
@@ -114,6 +117,7 @@ func (a *App) guideJob() tui.GuideJob {
 			return tencent.PolicyNameSuggestion(a.policyFilter(productIDs, scopeID, a.ExpWrite))
 		},
 		PolicySteps:     a.policySteps(),
+		SaveDefault:     "./" + guidePolicyFile,
 		InitialProducts: initialProducts,
 		InitialScope:    initialScope,
 	}

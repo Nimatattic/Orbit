@@ -299,6 +299,9 @@ Orbit · 应用证书 · main                                          12s
 | 策略名 | 跟随当前选择：只读=`orbit-readonly`、应用=`orbit-apply`、完整=`orbit-full` |
 | JSON 语法 | 只有 `version` 与 `statement`；每条语句只有 `effect`/`action`/`resource`，**没有 `sid`**；action 为 `service:Action` 形式 |
 | 初始选择 | `--scope`/`--products` 会预选向导中的范围与产品（不传时从只读、全产品开始） |
+| 保存（`w`） | 策略视图里按 `w` 弹出路径输入框，默认 `./orbit-account-policy.json`；回车保存、`esc` 取消；成功显示绝对路径，文件权限 0600 |
+| 保存路径处理 | 以 `/` 结尾或指向已存在目录 → 自动拼默认文件名；`~/` 会展开；父目录自动创建 |
+| 输入隔离 | 输入框打开时按键全部进入输入（路径含 `q`/`p`/`w` 不会误触发退出或切换），只有 `esc`/`ctrl+c` 例外 |
 
 ## 总控台（`orbit dash`）
 

@@ -55,7 +55,7 @@ go test ./internal/cloud/tencent/ -run TestPermissionTableCoversEverySDKCall   #
 **访问管理控制台 → 策略 → 新建自定义策略 → 按策略语法创建**：
 
 ```bash
-orbit account guide                                     # TUI：按 p 显示策略 JSON
+orbit account guide                                     # TUI：p 看策略 JSON，w 保存到文件
 orbit account guide --scope=read --products=cdn
 orbit account guide --scope=full --policy > my-policy.json
 orbit account guide --scope=full --policy-out ./orbit-policy.json

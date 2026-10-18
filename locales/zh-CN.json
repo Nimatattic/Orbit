@@ -332,5 +332,11 @@
   "keys.show_policy": "显示策略 JSON",
   "keys.hide_policy": "收起策略 JSON",
   "guide.policy_steps": "粘贴步骤",
-  "keys.back": "返回向导"
+  "keys.back": "返回向导",
+  "guide.save_title": "保存到文件",
+  "guide.save_prompt": "路径（回车保存）：",
+  "guide.saved": "已保存到 {path}",
+  "guide.save_empty": "路径不能为空",
+  "keys.save": "保存到文件",
+  "keys.save_confirm": "保存"
 }
