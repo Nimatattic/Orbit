@@ -338,5 +338,7 @@
   "guide.saved": "saved to {path}",
   "guide.save_empty": "the path cannot be empty",
   "keys.save": "save to file",
-  "keys.save_confirm": "save"
+  "keys.save_confirm": "save",
+  "guide.no_grant": "no grant needed",
+  "guide.policy_sources": "where the actions are documented:"
 }

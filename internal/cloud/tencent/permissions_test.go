@@ -248,6 +248,7 @@ func TestPolicyFilesMatchPermissions(t *testing.T) {
 
 func TestPermissionTableEntriesAreComplete(t *testing.T) {
 	seen := map[string]bool{}
+	grantable := 0
 	for _, p := range Permissions() {
 		if seen[p.Action] {
 			t.Fatalf("duplicate action %s", p.Action)
@@ -259,8 +260,52 @@ func TestPermissionTableEntriesAreComplete(t *testing.T) {
 		if TierLevel(p.Tier) == 0 {
 			t.Fatalf("%s has no tier", p.Action)
 		}
+		// Provenance: anything that goes into a policy must cite the vendor's
+		// own interface list, because the console refuses unknown actions.
+		if p.NoGrant {
+			if p.Source != "" {
+				t.Fatalf("%s needs no grant, so it should not cite a policy source", p.Action)
+			}
+			continue
+		}
+		grantable++
+		switch p.Source {
+		case SourceSSL, SourceCDN, SourceTEO:
+		default:
+			t.Fatalf("%s has no official source; cite the CAM interface list that documents it", p.Action)
+		}
 	}
-	if len(seen) < 10 {
-		t.Fatalf("the table looks truncated: %d actions", len(seen))
+	if len(seen) < 10 || grantable < 8 {
+		t.Fatalf("the table looks truncated: %d actions (%d grantable)", len(seen), grantable)
+	}
+}
+
+// TestNoGrantActionsStayOutOfPolicies guards the exact failure an operator hit:
+// the console rejected the whole document because it contained sts:GetCallerIdentity.
+func TestNoGrantActionsStayOutOfPolicies(t *testing.T) {
+	full := PermissionFilter{MaxTier: TierDelete, IncludeExperimental: true}
+	for _, p := range SelectPermissions(full) {
+		if p.NoGrant && !strings.HasPrefix(p.Action, "sts:") {
+			t.Fatalf("%s is marked no-grant; is that intended?", p.Action)
+		}
+	}
+	for _, p := range PolicyPermissions(full) {
+		if p.NoGrant {
+			t.Fatalf("no-grant action %s leaked into the policy", p.Action)
+		}
+	}
+
+	text, err := PolicyJSON(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(text, "sts:GetCallerIdentity") {
+		t.Fatalf("the policy must not contain the no-grant identity action:\n%s", text)
+	}
+	// Everything else in the table must still be there.
+	for _, p := range PolicyPermissions(full) {
+		if !strings.Contains(text, p.Action) {
+			t.Fatalf("%s is missing from the policy", p.Action)
+		}
 	}
 }

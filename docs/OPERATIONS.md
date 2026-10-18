@@ -75,6 +75,12 @@ orbit account guide --scope=full --policy-out ./orbit-policy.json
 statement 结构是 `{effect, action, resource, condition?}`，**没有 `sid`**（与 AWS 不同），
 控制台会校验 JSON 格式，因此不要手加字段。
 
+action 名取自官方接口列表：`ssl` → [98168](https://cloud.tencent.com/document/product/598/98168)、
+`cdn` → [98110](https://cloud.tencent.com/document/product/598/98110)、
+`teo` → [99327](https://cloud.tencent.com/document/product/598/99327)。
+**`sts:GetCallerIdentity` 不会写进策略**：它无需授权，且控制台遇到未知 action 会拒绝整份策略。
+`orbit account guide --json` 的 `no_grant_needed` 字段会列出这类接口。
+
 > 也可以直接在控制台附加官方预设策略（策略 → 预设策略，按产品名搜索）。预设策略是一键的，
 > 但粒度更粗：产品的全读写策略会连带授予该产品其它接口的权限。要最小权限就用生成的 JSON。
 

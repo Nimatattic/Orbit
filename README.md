@@ -137,6 +137,16 @@ enter 保存  ·  esc 取消
 - 保存成功后显示**绝对路径**的确认行；失败（如无写权限）会留在输入框里让你改，不会静默丢弃；
 - 输入框打开时所有按键都进入输入，所以像 `q`/`p`/`w` 这样的字符也能正常出现在路径里（`esc` 取消、`ctrl+c` 退出）。
 
+策略里的 action 全部来自腾讯云官方接口列表（可自行核对）：
+
+| 服务 | 官方接口列表 |
+| --- | --- |
+| `ssl` | [SSL 证书](https://cloud.tencent.com/document/product/598/98168) |
+| `cdn` | [内容分发网络 CDN](https://cloud.tencent.com/document/product/598/98110) |
+| `teo` | [边缘安全加速平台 EO](https://cloud.tencent.com/document/product/598/99327) |
+
+**`sts:GetCallerIdentity` 不在策略里**：身份查询不需要授权（你的账号在没有任何 `sts` 授权时也一直能查到归属），而 CAM 控制台遇到未知 action 会拒绝整份策略。它在向导里仍会显示，但标注为「无需授权」。
+
 JSON 遵循[官方策略语法](https://cloud.tencent.com/document/product/598/10604)：`policy = {version, statement}`、`statement = {effect, action, resource[, condition]}`。**注意腾讯云的 statement 结构里没有 `sid`**（与 AWS 不同），所以生成时特意不含该字段——控制台会校验 JSON，多余字段有被拒风险。策略名按范围建议为 `orbit-readonly` / `orbit-apply` / `orbit-full`。
 
 > 也可以直接附加官方预设策略（控制台「策略 → 预设策略」按产品名搜索），一键完成但粒度更粗——例如产品的全读写策略会连带授予该产品其它接口权限。要最小权限就用上面生成的 JSON。

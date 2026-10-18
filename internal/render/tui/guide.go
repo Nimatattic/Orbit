@@ -23,6 +23,9 @@ type GuidePermission struct {
 	Purpose string
 	// Experimental marks actions only needed by the experimental deploy strategy.
 	Experimental bool
+	// NoGrant marks an API that needs no CAM authorization; it is listed for
+	// completeness but never written into the policy.
+	NoGrant bool
 }
 
 // GuidePlatform is a cloud vendor the operator can choose.
@@ -65,6 +68,8 @@ type GuideJob struct {
 	PolicyName func(products []string, scopeID string) string
 	// PolicySteps are the console steps, already localised.
 	PolicySteps []string
+	// PolicySources are the official CAM interface lists, for spot-checking.
+	PolicySources []string
 	// SaveDefault is the path offered when the operator saves the policy.
 	SaveDefault string
 	// ServiceRole is the linked role the write/delete scopes need.
@@ -290,8 +295,13 @@ func (m *guideModel) View() string {
 		// The policy gets its own view: the JSON must be fully visible and
 		// scrollable, which is impossible if it shares the screen with the
 		// configuration panels.
+		stepLines := append([]string{}, m.job.PolicySteps...)
+		if len(m.job.PolicySources) > 0 {
+			stepLines = append(stepLines, "", m.bundle.T("guide.policy_sources"))
+			stepLines = append(stepLines, m.job.PolicySources...)
+		}
 		steps := panel(m.styles, m.bundle.T("guide.policy_steps"),
-			strings.Join(m.job.PolicySteps, "\n"), width, false)
+			strings.Join(stepLines, "\n"), width, false)
 		blocks := []string{header, steps, m.policyPanel(width)}
 		if save := m.savePanel(width); save != "" {
 			blocks = append(blocks, save)
@@ -417,7 +427,13 @@ func (m *guideModel) permissionPanel(width int, perms []GuidePermission) string 
 		case "delete":
 			tier = m.styles.fail.Render(fmt.Sprintf("%-7s", p.Tier))
 		}
-		line := tier + " " + fmt.Sprintf("%-44s", p.Action) + m.styles.dim.Render(p.Purpose)
+		// The no-grant marker sits right after the action so a long purpose
+		// cannot push it out of the panel.
+		marker := ""
+		if p.NoGrant {
+			marker = m.styles.warn.Render("(" + m.bundle.T("guide.no_grant") + ") ")
+		}
+		line := tier + " " + fmt.Sprintf("%-44s", p.Action) + marker + m.styles.dim.Render(p.Purpose)
 		if p.Experimental {
 			line += m.styles.dim.Render(" (" + m.bundle.T("guide.experimental") + ")")
 		}
@@ -509,8 +525,12 @@ func (m *guideModel) policyRows() int {
 	if m.height <= 0 {
 		return 20
 	}
-	// header(3) + steps(3+lines) + policy borders(2) + footer(1)
-	rows := m.height - 9 - len(m.job.PolicySteps)
+	// header(3) + steps(3+lines+sources) + policy borders(2) + footer(1)
+	steps := len(m.job.PolicySteps)
+	if len(m.job.PolicySources) > 0 {
+		steps += len(m.job.PolicySources) + 2
+	}
+	rows := m.height - 9 - steps
 	if m.saving || m.saveMsg != "" || m.saveErr != "" {
 		rows -= 4 // the save panel
 	}

@@ -10,7 +10,6 @@
         "ssl:DescribeCertificates",
         "ssl:DescribeHostCdnInstanceList",
         "ssl:DescribeHostTeoInstanceList",
-        "sts:GetCallerIdentity",
         "teo:DescribeAccelerationDomains",
         "teo:DescribeZones"
       ],

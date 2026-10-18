@@ -100,6 +100,7 @@ func (a *App) guideJob() tui.GuideJob {
 					Tier:         string(p.Tier),
 					Purpose:      a.Bundle.T(p.PurposeKey),
 					Experimental: p.Experimental,
+					NoGrant:      p.NoGrant,
 				})
 			}
 			return out
@@ -117,6 +118,7 @@ func (a *App) guideJob() tui.GuideJob {
 			return tencent.PolicyNameSuggestion(a.policyFilter(productIDs, scopeID, a.ExpWrite))
 		},
 		PolicySteps:     a.policySteps(),
+		PolicySources:   a.policySources(),
 		SaveDefault:     "./" + guidePolicyFile,
 		InitialProducts: initialProducts,
 		InitialScope:    initialScope,
@@ -150,6 +152,16 @@ func (a *App) policyFilter(productIDs []string, scopeID string, experimental boo
 		Scopes:              a.scopeIDs(productIDs),
 		MaxTier:             a.guideMaxTier(scopeID),
 		IncludeExperimental: experimental,
+	}
+}
+
+// policySources lists the official CAM interface lists behind the actions, so an
+// operator can verify the names instead of trusting the tool.
+func (a *App) policySources() []string {
+	return []string{
+		"ssl  " + tencent.SourceSSL,
+		"cdn  " + tencent.SourceCDN,
+		"teo  " + tencent.SourceTEO,
 	}
 }
 
@@ -217,6 +229,16 @@ func (a *App) renderGuide() error {
 		if text, err := tencent.PolicyJSON(a.policyFilter(productIDs, scope, a.ExpWrite)); err == nil {
 			payload["policy"] = json.RawMessage(text)
 			payload["policy_name"] = tencent.PolicyNameSuggestion(a.policyFilter(productIDs, scope, a.ExpWrite))
+			payload["policy_sources"] = map[string]string{
+				"ssl": tencent.SourceSSL, "cdn": tencent.SourceCDN, "teo": tencent.SourceTEO,
+			}
+			noGrant := []string{}
+			for _, p := range a.selectedPermissions(productIDs, scope, a.ExpWrite) {
+				if p.NoGrant {
+					noGrant = append(noGrant, p.Action)
+				}
+			}
+			payload["no_grant_needed"] = noGrant
 		}
 		return a.jsonOut(payload)
 	}
@@ -228,10 +250,18 @@ func (a *App) renderGuide() error {
 	fmt.Fprintln(a.Out, a.Bundle.T("guide.permissions_count", "count", len(items)))
 	for _, p := range items {
 		line := fmt.Sprintf("  %-7s %-44s %s", p.Tier, p.Action, a.Bundle.T(p.PurposeKey))
+		if p.NoGrant {
+			line += " (" + a.Bundle.T("guide.no_grant") + ")"
+		}
 		if p.Experimental {
 			line += " (" + a.Bundle.T("guide.experimental") + ")"
 		}
 		fmt.Fprintln(a.Out, line)
+	}
+	fmt.Fprintln(a.Out)
+	fmt.Fprintln(a.Out, a.Bundle.T("guide.policy_sources"))
+	for _, src := range a.policySources() {
+		fmt.Fprintln(a.Out, "  "+src)
 	}
 	if a.guideMaxTier(scope) != tencent.TierRead {
 		fmt.Fprintln(a.Out)

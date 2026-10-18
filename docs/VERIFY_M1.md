@@ -298,6 +298,8 @@ Orbit · 应用证书 · main                                          12s
 | 策略视图 | 按 `p` 进入独立视图：上方 4 步粘贴指引，下方完整 JSON 可滚动；`p`/`esc` 返回向导，`q` 退出 |
 | 策略名 | 跟随当前选择：只读=`orbit-readonly`、应用=`orbit-apply`、完整=`orbit-full` |
 | JSON 语法 | 只有 `version` 与 `statement`；每条语句只有 `effect`/`action`/`resource`，**没有 `sid`**；action 为 `service:Action` 形式 |
+| 无需授权项 | `sts:GetCallerIdentity` 在向导里标注「无需授权」，**不出现在策略 JSON 里**（控制台遇到未知 action 会拒绝整份策略） |
+| 权限出处 | 文本模式与策略视图底部列出 action 的官方接口列表 URL（ssl/cdn/teo 三份），可直接核对 |
 | 初始选择 | `--scope`/`--products` 会预选向导中的范围与产品（不传时从只读、全产品开始） |
 | 保存（`w`） | 策略视图里按 `w` 弹出路径输入框，默认 `./orbit-account-policy.json`；回车保存、`esc` 取消；成功显示绝对路径，文件权限 0600 |
 | 保存路径处理 | 以 `/` 结尾或指向已存在目录 → 自动拼默认文件名；`~/` 会展开；父目录自动创建 |

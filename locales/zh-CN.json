@@ -338,5 +338,7 @@
   "guide.saved": "已保存到 {path}",
   "guide.save_empty": "路径不能为空",
   "keys.save": "保存到文件",
-  "keys.save_confirm": "保存"
+  "keys.save_confirm": "保存",
+  "guide.no_grant": "无需授权",
+  "guide.policy_sources": "权限出处（可自行核对）："
 }
