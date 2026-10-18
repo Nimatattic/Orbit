@@ -52,22 +52,23 @@ type App struct {
 	NoCache    bool
 
 	// Command flags shared by update/clean/status.
-	Accounts    string
-	AllAccounts bool
-	Platforms   string
-	Products    string
-	GuideScope  string
-	GuidePolicy bool
-	Domains     string
-	DryRun      bool
-	Yes         bool
-	FailOnChg   bool
-	Strategy    string
-	OlderThan   string
-	IncludeFree bool
-	PartialScan bool
-	BackupDir   string
-	ExpWrite    bool
+	Accounts       string
+	AllAccounts    bool
+	Platforms      string
+	Products       string
+	GuideScope     string
+	GuidePolicy    bool
+	GuidePolicyOut string
+	Domains        string
+	DryRun         bool
+	Yes            bool
+	FailOnChg      bool
+	Strategy       string
+	OlderThan      string
+	IncludeFree    bool
+	PartialScan    bool
+	BackupDir      string
+	ExpWrite       bool
 
 	Loaded *config.Loaded
 	Bundle *i18n.Bundle

@@ -322,5 +322,15 @@
   "perm.ssl.delete": "删除未被任何资源使用的证书",
   "perm.ssl.delete_task": "查询删除任务的异步状态",
   "perm.ssl.deploy": "统一部署策略下发证书（--strategy=deploy）",
-  "perm.ssl.deploy_record": "轮询统一部署记录的状态"
+  "perm.ssl.deploy_record": "轮询统一部署记录的状态",
+  "guide.policy_title": "自定义策略 JSON（可直接粘贴）",
+  "guide.policy_step1": "1. 访问管理控制台 → 策略 → 新建自定义策略",
+  "guide.policy_step2": "2. 选择「按策略语法创建」，模板任意（内容会被替换）",
+  "guide.policy_step3": "3. 把上面的 JSON 粘贴到「策略内容」，命名后保存",
+  "guide.policy_step4": "4. 把该策略关联到 API 子账号（或它所在的用户组）",
+  "guide.policy_written": "策略已写入 {path}",
+  "keys.show_policy": "显示策略 JSON",
+  "keys.hide_policy": "收起策略 JSON",
+  "guide.policy_steps": "粘贴步骤",
+  "keys.back": "返回向导"
 }

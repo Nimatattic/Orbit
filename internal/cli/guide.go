@@ -2,7 +2,9 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -41,8 +43,11 @@ func (a *App) newAccountGuideCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&a.Products, "products", "", "")
-	cmd.Flags().StringVar(&a.GuideScope, "scope", "full", "")
+	// An empty default keeps "flag not set" distinguishable: the console then
+	// starts at read-only while the text mode prints the complete list.
+	cmd.Flags().StringVar(&a.GuideScope, "scope", "", "")
 	cmd.Flags().BoolVar(&a.GuidePolicy, "policy", false, "")
+	cmd.Flags().StringVar(&a.GuidePolicyOut, "policy-out", "", "")
 	return cmd
 }
 
@@ -70,6 +75,11 @@ func (a *App) guideJob() tui.GuideJob {
 		})
 	}
 
+	// Flags pre-select the console; when unset the guide starts from every
+	// product and the safest level (read-only).
+	initialProducts := a.guideInitialProducts()
+	initialScope := a.guideInitialScope()
+
 	return tui.GuideJob{
 		Platforms: []tui.GuidePlatform{
 			{ID: DefaultPlatform, Label: a.Bundle.T("guide.platform.tencent"), Available: true},
@@ -93,6 +103,59 @@ func (a *App) guideJob() tui.GuideJob {
 		},
 		ServiceRole: tencent.ServiceRole,
 		PolicyHint:  a.Bundle.T("guide.policy_hint"),
+		PolicyJSON: func(productIDs []string, scopeID string, experimental bool) string {
+			text, err := tencent.PolicyJSON(a.policyFilter(productIDs, scopeID, experimental))
+			if err != nil {
+				return ""
+			}
+			return text
+		},
+		PolicyName: func(productIDs []string, scopeID string) string {
+			return tencent.PolicyNameSuggestion(a.policyFilter(productIDs, scopeID, a.ExpWrite))
+		},
+		PolicySteps:     a.policySteps(),
+		InitialProducts: initialProducts,
+		InitialScope:    initialScope,
+	}
+}
+
+// guideInitialProducts returns the product ids passed on the command line, or nil
+// when the flag was not used (meaning "everything").
+func (a *App) guideInitialProducts() []string {
+	if strings.TrimSpace(a.Products) == "" {
+		return nil
+	}
+	return a.guideProductsFromFlag()
+}
+
+// guideInitialScope returns the --scope value, or "" when it was not set so the
+// console can start at the safest level.
+func (a *App) guideInitialScope() string {
+	scope := strings.ToLower(strings.TrimSpace(a.GuideScope))
+	for _, s := range guideScopes {
+		if s.ID == scope {
+			return scope
+		}
+	}
+	return ""
+}
+
+// policyFilter builds the tencent filter for one selection.
+func (a *App) policyFilter(productIDs []string, scopeID string, experimental bool) tencent.PermissionFilter {
+	return tencent.PermissionFilter{
+		Scopes:              a.scopeIDs(productIDs),
+		MaxTier:             a.guideMaxTier(scopeID),
+		IncludeExperimental: experimental,
+	}
+}
+
+// policySteps describes the console path, localised.
+func (a *App) policySteps() []string {
+	return []string{
+		a.Bundle.T("guide.policy_step1"),
+		a.Bundle.T("guide.policy_step2"),
+		a.Bundle.T("guide.policy_step3"),
+		a.Bundle.T("guide.policy_step4"),
 	}
 }
 
@@ -105,12 +168,28 @@ func (a *App) renderGuide() error {
 	scope := a.normalisedGuideScope()
 	items := a.selectedPermissions(productIDs, scope, a.ExpWrite)
 
-	if a.GuidePolicy {
-		return a.jsonOut(tencent.PolicyDocument(tencent.PermissionFilter{
-			Scopes:              a.scopeIDs(productIDs),
-			MaxTier:             a.guideMaxTier(scope),
-			IncludeExperimental: a.ExpWrite,
-		}))
+	if a.GuidePolicy || a.GuidePolicyOut != "" {
+		text, err := tencent.PolicyJSON(a.policyFilter(productIDs, scope, a.ExpWrite))
+		if err != nil {
+			return err
+		}
+		if a.GuidePolicyOut != "" {
+			if err := os.WriteFile(a.GuidePolicyOut, []byte(text), 0o600); err != nil {
+				return exitcode.Wrap(err, exitcode.Fatal, "err.generic", "error", err)
+			}
+			fmt.Fprintln(a.Err, a.Bundle.T("guide.policy_written", "path", a.GuidePolicyOut))
+		}
+		if a.GuidePolicy {
+			// Keep stdout pure JSON so it can be piped into a file.
+			fmt.Fprint(a.Out, text)
+			for _, step := range a.policySteps() {
+				fmt.Fprintln(a.Err, step)
+			}
+		}
+		if !a.GuidePolicy {
+			return nil
+		}
+		return nil
 	}
 	if a.JSON {
 		payload := map[string]any{
@@ -130,6 +209,10 @@ func (a *App) renderGuide() error {
 				}
 				return out
 			}(),
+		}
+		if text, err := tencent.PolicyJSON(a.policyFilter(productIDs, scope, a.ExpWrite)); err == nil {
+			payload["policy"] = json.RawMessage(text)
+			payload["policy_name"] = tencent.PolicyNameSuggestion(a.policyFilter(productIDs, scope, a.ExpWrite))
 		}
 		return a.jsonOut(payload)
 	}
@@ -152,6 +235,17 @@ func (a *App) renderGuide() error {
 	}
 	fmt.Fprintln(a.Out)
 	fmt.Fprintln(a.Out, a.Bundle.T("guide.policy_hint"))
+	fmt.Fprintln(a.Out)
+	text, err := tencent.PolicyJSON(a.policyFilter(productIDs, scope, a.ExpWrite))
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(a.Out, "%s %s\n\n", a.Bundle.T("guide.policy_title"), tencent.PolicyNameSuggestion(a.policyFilter(productIDs, scope, a.ExpWrite)))
+	fmt.Fprint(a.Out, text)
+	fmt.Fprintln(a.Out)
+	for _, step := range a.policySteps() {
+		fmt.Fprintln(a.Out, step)
+	}
 	return nil
 }
 

@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
+	"strings"
 	"testing"
 )
 
@@ -109,37 +111,95 @@ func TestSelectPermissionsFiltersByTierAndScope(t *testing.T) {
 	}
 }
 
-func TestPolicyDocumentGroupsByTier(t *testing.T) {
+// TestPolicyDocumentFollowsTheOfficialGrammar pins the shape documented at
+// https://cloud.tencent.com/document/product/598/10604 : a policy is
+// {version, statement} and a statement is {effect, action, resource[, condition]}.
+// There is no "sid" in Tencent Cloud's grammar, and the console validates the
+// JSON, so an extra key is a real risk.
+func TestPolicyDocumentFollowsTheOfficialGrammar(t *testing.T) {
 	policy := PolicyDocument(PermissionFilter{MaxTier: TierWrite})
 	raw, err := json.Marshal(policy)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var parsed struct {
-		Version   string `json:"version"`
-		Statement []struct {
-			SID      string   `json:"sid"`
-			Effect   string   `json:"effect"`
-			Action   []string `json:"action"`
-			Resource []string `json:"resource"`
-		} `json:"statement"`
-	}
-	if err := json.Unmarshal(raw, &parsed); err != nil {
+
+	var generic map[string]any
+	if err := json.Unmarshal(raw, &generic); err != nil {
 		t.Fatal(err)
 	}
-	if parsed.Version != "2.0" {
-		t.Fatalf("version = %q", parsed.Version)
+	if _, ok := generic["sid"]; ok {
+		t.Fatal("a policy must not carry sid")
 	}
-	if len(parsed.Statement) != 2 {
-		t.Fatalf("expected a read and a write statement, got %d", len(parsed.Statement))
+	keys := make([]string, 0, len(generic))
+	for k := range generic {
+		keys = append(keys, k)
 	}
-	for _, s := range parsed.Statement {
-		if s.Effect != "allow" || len(s.Action) == 0 || len(s.Resource) != 1 || s.Resource[0] != "*" {
-			t.Fatalf("statement is malformed: %+v", s)
+	sort.Strings(keys)
+	if len(keys) != 2 || keys[0] != "statement" || keys[1] != "version" {
+		t.Fatalf("policy keys = %v, want [statement version]", keys)
+	}
+	if generic["version"] != "2.0" {
+		t.Fatalf("version = %v, want \"2.0\"", generic["version"])
+	}
+
+	statements, ok := generic["statement"].([]any)
+	if !ok || len(statements) != 2 {
+		t.Fatalf("expected a read and a write statement, got %#v", generic["statement"])
+	}
+	for _, rawStmt := range statements {
+		stmt, ok := rawStmt.(map[string]any)
+		if !ok {
+			t.Fatalf("statement is not an object: %#v", rawStmt)
+		}
+		for k := range stmt {
+			switch k {
+			case "effect", "action", "resource", "condition":
+			default:
+				t.Fatalf("unexpected statement key %q", k)
+			}
+		}
+		if stmt["effect"] != "allow" {
+			t.Fatalf("effect = %v, want allow", stmt["effect"])
+		}
+		res, _ := stmt["resource"].([]any)
+		if len(res) != 1 || res[0] != "*" {
+			t.Fatalf("resource = %#v, want [\"*\"]", stmt["resource"])
+		}
+		actions, _ := stmt["action"].([]any)
+		if len(actions) == 0 {
+			t.Fatal("a statement with no actions is pointless")
+		}
+		for _, a := range actions {
+			str, _ := a.(string)
+			if !strings.Contains(str, ":") {
+				t.Fatalf("action %q must be in service:Action form", str)
+			}
 		}
 	}
-	if len(parsed.Statement[0].Action) == 0 {
-		t.Fatal("the read statement must carry the inventory actions")
+
+	text, err := PolicyJSON(PermissionFilter{MaxTier: TierRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var round map[string]any
+	if err := json.Unmarshal([]byte(text), &round); err != nil {
+		t.Fatalf("the paste-ready text must be valid JSON: %v", err)
+	}
+	if !strings.HasSuffix(text, "\n") {
+		t.Fatal("the text should end with a newline so it pastes cleanly")
+	}
+}
+
+func TestPolicyNameSuggestion(t *testing.T) {
+	cases := map[PermissionTier]string{
+		TierRead:   "orbit-readonly",
+		TierWrite:  "orbit-apply",
+		TierDelete: "orbit-full",
+	}
+	for tier, want := range cases {
+		if got := PolicyNameSuggestion(PermissionFilter{MaxTier: tier}); got != want {
+			t.Fatalf("name for %s = %q, want %q", tier, got, want)
+		}
 	}
 }
 

@@ -1,6 +1,8 @@
 {
+  "version": "2.0",
   "statement": [
     {
+      "effect": "allow",
       "action": [
         "cdn:DescribeDomainsConfig",
         "ssl:CreateCertificateBindResourceSyncTask",
@@ -12,12 +14,9 @@
         "teo:DescribeAccelerationDomains",
         "teo:DescribeZones"
       ],
-      "effect": "allow",
       "resource": [
         "*"
-      ],
-      "sid": "orbit-read"
+      ]
     }
-  ],
-  "version": "2.0"
+  ]
 }

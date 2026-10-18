@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/Crequency/orbit/internal/i18n"
 )
 
@@ -223,5 +225,111 @@ func TestGuideViewRendersAllSections(t *testing.T) {
 	// The unavailable platform is shown but marked.
 	if !strings.Contains(out, "Alibaba Cloud") || !strings.Contains(out, "(planned)") {
 		t.Fatalf("the planned platform should be listed with a note:\n%s", out)
+	}
+}
+
+func TestGuidePolicyPanelTogglesAndShowsJSON(t *testing.T) {
+	job := testGuideJob()
+	job.PolicyJSON = func([]string, string, bool) string {
+		return "{\n  \"version\": \"2.0\",\n  \"statement\": []\n}\n"
+	}
+	job.PolicyName = func([]string, string) string { return "orbit-readonly" }
+	job.PolicySteps = []string{"1. open the console", "2. paste the JSON"}
+
+	bundle, _ := i18n.New("en-US")
+	m := newGuideModel(bundle, job, true)
+	m.width, m.height = 100, 34
+
+	if strings.Contains(m.View(), "Custom policy JSON") {
+		t.Fatal("the policy panel starts hidden")
+	}
+
+	// `p` reveals it and moves focus there so the arrows scroll it.
+	next, _ := m.Update(key("p"))
+	m = next.(*guideModel)
+	if !m.showPolicy || m.focus != guideSectionPolicy {
+		t.Fatalf("p must show the panel and focus it, show=%v focus=%d", m.showPolicy, m.focus)
+	}
+	out := m.View()
+	for _, want := range []string{"Custom policy JSON", "orbit-readonly", "\"version\": \"2.0\"", "1. open the console", "how to paste"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("policy view is missing %q:\n%s", want, out)
+		}
+	}
+	// The configuration panels are replaced by the policy view, not squeezed.
+	if strings.Contains(out, "2. Product scope") {
+		t.Fatalf("the policy view should own the screen:\n%s", out)
+	}
+
+	// Toggling it off returns to the configuration view.
+	next, _ = m.Update(key("p"))
+	m = next.(*guideModel)
+	if m.showPolicy || m.focus != guideSectionList {
+		t.Fatalf("p must leave the policy view, show=%v focus=%d", m.showPolicy, m.focus)
+	}
+
+	// Esc also returns to the guide rather than quitting.
+	next, _ = m.Update(key("p"))
+	m = next.(*guideModel)
+	next, cmd := m.Update(key("esc"))
+	m = next.(*guideModel)
+	if m.showPolicy || cmd != nil {
+		t.Fatalf("esc should return to the guide without quitting, show=%v cmd=%v", m.showPolicy, cmd != nil)
+	}
+}
+
+func TestGuidePolicyPanelScrollsAndWraps(t *testing.T) {
+	var long strings.Builder
+	for i := 0; i < 60; i++ {
+		long.WriteString("  \"ssl:DescribeCertificateBindResourceTaskResultWithALongName\",\n")
+	}
+	job := testGuideJob()
+	job.PolicyJSON = func([]string, string, bool) string { return long.String() }
+
+	bundle, _ := i18n.New("en-US")
+	m := newGuideModel(bundle, job, true)
+	m.width, m.height = 80, 30
+	next, _ := m.Update(key("p"))
+	m = next.(*guideModel)
+
+	// Everything must fit the panel width, even mid-token.
+	for _, line := range m.policyLines() {
+		if w := lipgloss.Width(line); w > m.windowWidth()-4 {
+			t.Fatalf("policy line is too wide (%d): %q", w, line)
+		}
+	}
+
+	next, _ = m.Update(key("down"))
+	m = next.(*guideModel)
+	if m.policyScroll != 1 {
+		t.Fatalf("policy scroll = %d, want 1", m.policyScroll)
+	}
+	for i := 0; i < 200; i++ {
+		next, _ = m.Update(key("down"))
+		m = next.(*guideModel)
+	}
+	if want := len(m.policyLines()) - m.policyRows(); m.policyScroll != want {
+		t.Fatalf("scroll = %d, want the last page %d", m.policyScroll, want)
+	}
+}
+
+func TestGuideInitialSelectionFromFlags(t *testing.T) {
+	job := testGuideJob()
+	job.InitialProducts = []string{"cdn"} // ssl is required and must stay on
+	job.InitialScope = "apply"
+
+	bundle, _ := i18n.New("en-US")
+	m := newGuideModel(bundle, job, true)
+	if !m.products["ssl"] {
+		t.Fatal("a required product must stay enabled even when not listed")
+	}
+	if !m.products["cdn"] {
+		t.Fatalf("the requested product must start enabled: %v", m.products)
+	}
+	if m.products["teo"] {
+		t.Fatalf("unrequested products must stay off: %v", m.products)
+	}
+	if m.scope != 1 {
+		t.Fatalf("scope = %d, want the apply level", m.scope)
 	}
 }

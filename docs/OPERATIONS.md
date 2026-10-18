@@ -51,13 +51,32 @@ go test ./internal/cloud/tencent/ -run TestPolicyFilesMatch -update   # 重新�
 go test ./internal/cloud/tencent/ -run TestPermissionTableCoversEverySDKCall   # 防漂移校验
 ```
 
-不确定要开哪些权限时，用向导按需生成（还能看到每个权限的用途）：
+不确定要开哪些权限时，用向导按需生成（还能看到每个权限的用途），并把输出直接粘贴到
+**访问管理控制台 → 策略 → 新建自定义策略 → 按策略语法创建**：
 
 ```bash
-orbit account guide                      # TUI：云厂商 × 产品范围 × 使用范围
+orbit account guide                                     # TUI：按 p 显示策略 JSON
 orbit account guide --scope=read --products=cdn
 orbit account guide --scope=full --policy > my-policy.json
+orbit account guide --scope=full --policy-out ./orbit-policy.json
 ```
+
+生成的 JSON 遵循[官方策略语法](https://cloud.tencent.com/document/product/598/10604)：
+
+```json
+{
+  "version": "2.0",
+  "statement": [
+    { "effect": "allow", "action": ["ssl:DescribeCertificates"], "resource": ["*"] }
+  ]
+}
+```
+
+statement 结构是 `{effect, action, resource, condition?}`，**没有 `sid`**（与 AWS 不同），
+控制台会校验 JSON 格式，因此不要手加字段。
+
+> 也可以直接在控制台附加官方预设策略（策略 → 预设策略，按产品名搜索）。预设策略是一键的，
+> 但粒度更粗：产品的全读写策略会连带授予该产品其它接口的权限。要最小权限就用生成的 JSON。
 
 **推荐两套子账号**：
 

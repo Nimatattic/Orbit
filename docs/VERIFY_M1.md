@@ -295,6 +295,10 @@ Orbit · 应用证书 · main                                          12s
 | 服务角色 | 只在「应用证书」及以上范围才显示 `SSL_QCSLinkedRoleInReplaceLoadCertificate` |
 | 取值校验 | `--scope` 非法值报错退出，不会静默按"完整"处理 |
 | 策略一致 | `--policy` 的输出与 `docs/cam/*.json` 中同档位的文件一致（有测试保证） |
+| 策略视图 | 按 `p` 进入独立视图：上方 4 步粘贴指引，下方完整 JSON 可滚动；`p`/`esc` 返回向导，`q` 退出 |
+| 策略名 | 跟随当前选择：只读=`orbit-readonly`、应用=`orbit-apply`、完整=`orbit-full` |
+| JSON 语法 | 只有 `version` 与 `statement`；每条语句只有 `effect`/`action`/`resource`，**没有 `sid`**；action 为 `service:Action` 形式 |
+| 初始选择 | `--scope`/`--products` 会预选向导中的范围与产品（不传时从只读、全产品开始） |
 
 ## 总控台（`orbit dash`）
 

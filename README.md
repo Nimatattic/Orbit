@@ -67,9 +67,10 @@ TUI 只接管屏幕，日志与结果仍会落回终端（退出后打印文本�
 不知道这个账号到底要开哪些权限时，用它：
 
 ```bash
-orbit account guide                # TUI：选云厂商、产品范围、使用范围，实时看清单
+orbit account guide                                      # TUI：选云厂商/产品/使用范围，按 p 直接看策略 JSON
 orbit account guide --scope=read --products=cdn          # 纯文本，只读 + 仅 CDN
-orbit account guide --scope=full --policy > policy.json  # 直接输出可粘贴的 CAM 策略
+orbit account guide --scope=full --policy > policy.json  # 只输出 JSON（stdout 纯净，可管道）
+orbit account guide --scope=full --policy-out p.json     # 写到文件（0600）
 ```
 
 ```
@@ -98,6 +99,33 @@ orbit account guide --scope=full --policy > policy.json  # 直接输出可粘贴
 - 每个 action 都标注**为什么需要它**（如"删除前导出证书材料"、"发起关联查询"），并区分 read / write / delete 三档。
 - 使用范围含写入或删除时，额外提示需要一次性的服务角色 `SSL_QCSLinkedRoleInReplaceLoadCertificate`。
 - `--scope` 取值非法会直接报错，不会静默当作"完整"——避免误开过大权限。
+
+**按 `p` 进入策略视图**：完整屏幕显示可直接复制的自定义策略 JSON（可滚动），上方是控制台粘贴步骤：
+
+```
+╭─ 粘贴步骤 ───────────────────────────────────────────────╮
+│1. 访问管理控制台 → 策略 → 新建自定义策略                 │
+│2. 选择「按策略语法创建」，模板任意（内容会被替换）        │
+│3. 把上面的 JSON 粘贴到「策略内容」，命名后保存            │
+│4. 把该策略关联到 API 子账号（或它所在的用户组）           │
+╰──────────────────────────────────────────────────────────╯
+╭─ 自定义策略 JSON（可直接粘贴）  orbit-readonly ───────────╮
+│{                                                         │
+│  "version": "2.0",                                        │
+│  "statement": [                                           │
+│    {                                                      │
+│      "effect": "allow",                                   │
+│      "action": ["cdn:DescribeDomainsConfig", …],          │
+│      "resource": ["*"]                                    │
+│    }                                                      │
+│  ]                                                        │
+│}                                                         │
+╰──────────────────────────────────────────────────────────╯
+```
+
+JSON 遵循[官方策略语法](https://cloud.tencent.com/document/product/598/10604)：`policy = {version, statement}`、`statement = {effect, action, resource[, condition]}`。**注意腾讯云的 statement 结构里没有 `sid`**（与 AWS 不同），所以生成时特意不含该字段——控制台会校验 JSON，多余字段有被拒风险。策略名按范围建议为 `orbit-readonly` / `orbit-apply` / `orbit-full`。
+
+> 也可以直接附加官方预设策略（控制台「策略 → 预设策略」按产品名搜索），一键完成但粒度更粗——例如产品的全读写策略会连带授予该产品其它接口权限。要最小权限就用上面生成的 JSON。
 
 权限清单的**唯一事实源是代码**（[`internal/cloud/tencent/permissions.go`](internal/cloud/tencent/permissions.go)），`docs/cam/*.json` 由它生成，并且有测试反射 SDK 接口做防漂移：任何新调用的腾讯云接口若没登记进权限表，测试会失败。
 

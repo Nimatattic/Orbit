@@ -49,8 +49,19 @@ type GuideJob struct {
 	Platforms []GuidePlatform
 	Products  []GuideProduct
 	Scopes    []GuideScope
+	// InitialProducts and InitialScope pre-select the flags the operator passed;
+	// empty means "everything / the safest level".
+	InitialProducts []string
+	InitialScope    string
 	// Permissions recomputes the list for the current selection.
 	Permissions func(products []string, scopeID string, experimental bool) []GuidePermission
+	// PolicyJSON renders the custom policy for the current selection: the text
+	// the operator pastes into the console's "按策略语法创建" editor.
+	PolicyJSON func(products []string, scopeID string, experimental bool) string
+	// PolicyName suggests a console name for the current selection.
+	PolicyName func(products []string, scopeID string) string
+	// PolicySteps are the console steps, already localised.
+	PolicySteps []string
 	// ServiceRole is the linked role the write/delete scopes need.
 	ServiceRole string
 	// PolicyHint tells the operator where a paste-ready policy lives.
@@ -63,6 +74,7 @@ const (
 	guideSectionProducts
 	guideSectionScope
 	guideSectionList
+	guideSectionPolicy
 	guideSectionCount
 )
 
@@ -75,6 +87,8 @@ type guideModel struct {
 	products      map[string]bool
 	scope         int
 	scroll        int
+	policyScroll  int
+	showPolicy    bool
 
 	focus  int
 	width  int
@@ -84,14 +98,31 @@ type guideModel struct {
 
 func newGuideModel(bundle *i18n.Bundle, job GuideJob, noColor bool) *guideModel {
 	products := map[string]bool{}
-	for _, p := range job.Products {
+	if len(job.InitialProducts) == 0 {
 		// Everything starts enabled: the guide answers "what would I need".
-		products[p.ID] = true
+		for _, p := range job.Products {
+			products[p.ID] = true
+		}
+	} else {
+		wanted := map[string]bool{}
+		for _, id := range job.InitialProducts {
+			wanted[id] = true
+		}
+		for _, p := range job.Products {
+			// Required products cannot be pre-deselected.
+			products[p.ID] = wanted[p.ID] || p.Required
+		}
 	}
-	return &guideModel{
+	m := &guideModel{
 		bundle: bundle, job: job, products: products,
 		width: 100, styles: newStyles(noColor),
 	}
+	for i, s := range job.Scopes {
+		if s.ID == job.InitialScope {
+			m.scope = i
+		}
+	}
+	return m
 }
 
 // Init implements tea.Model.
@@ -106,13 +137,31 @@ func (m *guideModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "q", "esc":
+		case "ctrl+c", "q":
+			return m, tea.Quit
+		case "esc":
+			if m.showPolicy {
+				// Esc leaves the policy view instead of quitting: the operator is
+				// one keypress away from the configuration they just built.
+				m.showPolicy = false
+				m.focus = guideSectionList
+				return m, nil
+			}
 			return m, tea.Quit
 		case "tab", "s":
-			m.focus = (m.focus + 1) % guideSectionCount
+			m.cycleFocus(1)
 			return m, nil
 		case "shift+tab":
-			m.focus = (m.focus - 1 + guideSectionCount) % guideSectionCount
+			m.cycleFocus(-1)
+			return m, nil
+		case "p":
+			m.showPolicy = !m.showPolicy
+			if m.showPolicy {
+				m.focus = guideSectionPolicy
+				m.policyScroll = 0
+			} else if m.focus == guideSectionPolicy {
+				m.focus = guideSectionList
+			}
 			return m, nil
 		case "up", "k":
 			m.move(-1)
@@ -138,6 +187,18 @@ func (m *guideModel) move(delta int) {
 		m.scope = clamp(m.scope+delta, 0, len(m.job.Scopes)-1)
 	case guideSectionList:
 		m.scroll = clamp(m.scroll+delta, 0, maxInt(0, len(m.permissions())-m.listRows()))
+	case guideSectionPolicy:
+		m.policyScroll = clamp(m.policyScroll+delta, 0, maxInt(0, len(m.policyLines())-m.policyRows()))
+	}
+}
+
+// cycleFocus moves through the sections, skipping the policy panel while hidden.
+func (m *guideModel) cycleFocus(delta int) {
+	for i := 0; i < guideSectionCount; i++ {
+		m.focus = (m.focus + delta + guideSectionCount) % guideSectionCount
+		if m.focus != guideSectionPolicy || m.showPolicy {
+			return
+		}
 	}
 }
 
@@ -193,6 +254,15 @@ func (m *guideModel) View() string {
 	header := panel(m.styles, "Orbit",
 		m.styles.title.Render(m.bundle.T("guide.title"))+"\n"+
 			m.styles.subtitle.Render(m.bundle.T("guide.subtitle")), width, false)
+
+	if m.showPolicy {
+		// The policy gets its own view: the JSON must be fully visible and
+		// scrollable, which is impossible if it shares the screen with the
+		// configuration panels.
+		steps := panel(m.styles, m.bundle.T("guide.policy_steps"),
+			strings.Join(m.job.PolicySteps, "\n"), width, false)
+		return screen(width, m.height, m.policyFooter(), header, steps, m.policyPanel(width))
+	}
 
 	perms := m.permissions()
 	blocks := []string{
@@ -336,6 +406,89 @@ func (m *guideModel) rolePanel(width int) string {
 	return panel(m.styles, m.bundle.T("guide.extra_requirements"), body, width, false)
 }
 
+// policyText is the JSON for the current selection.
+func (m *guideModel) policyText() string {
+	if m.job.PolicyJSON == nil {
+		return ""
+	}
+	scope := ""
+	if m.scope < len(m.job.Scopes) {
+		scope = m.job.Scopes[m.scope].ID
+	}
+	return m.job.PolicyJSON(m.selectedProducts(), scope, false)
+}
+
+// policyLines is the JSON, wrapped to the panel width.
+func (m *guideModel) policyLines() []string {
+	width := m.windowWidth() - 6
+	if width < 20 {
+		width = 20
+	}
+	body := strings.TrimRight(m.policyText(), "\n")
+	if body == "" {
+		return nil
+	}
+	var out []string
+	for _, line := range strings.Split(body, "\n") {
+		out = append(out, wrapLine(line, width)...)
+	}
+	return out
+}
+
+func (m *guideModel) policyPanel(width int) string {
+	lines := m.policyLines()
+	if len(lines) == 0 {
+		return panel(m.styles, m.bundle.T("guide.policy_title"), m.bundle.T("status.none"), width, m.focus == guideSectionPolicy)
+	}
+	rows := m.policyRows()
+	m.policyScroll = clamp(m.policyScroll, 0, maxInt(0, len(lines)-rows))
+	end := m.policyScroll + rows
+	if end > len(lines) {
+		end = len(lines)
+	}
+
+	var b strings.Builder
+	for i := m.policyScroll; i < end; i++ {
+		b.WriteString(lines[i])
+		if i < end-1 {
+			b.WriteString("\n")
+		}
+	}
+	if end < len(lines) {
+		b.WriteString("\n" + m.styles.dim.Render(m.bundle.T("guide.more", "count", len(lines)-end)))
+	}
+	title := m.bundle.T("guide.policy_title")
+	if m.job.PolicyName != nil {
+		scope := ""
+		if m.scope < len(m.job.Scopes) {
+			scope = m.job.Scopes[m.scope].ID
+		}
+		if name := m.job.PolicyName(m.selectedProducts(), scope); name != "" {
+			title += "  " + name
+		}
+	}
+	return panel(m.styles, title, b.String(), width, m.focus == guideSectionPolicy)
+}
+
+func (m *guideModel) policyRows() int {
+	if m.height <= 0 {
+		return 20
+	}
+	// header(3) + steps(3+lines) + policy borders(2) + footer(1)
+	rows := m.height - 9 - len(m.job.PolicySteps)
+	if rows < 4 {
+		rows = 4
+	}
+	return rows
+}
+
+func (m *guideModel) windowWidth() int {
+	if m.width < 40 {
+		return 100
+	}
+	return m.width
+}
+
 func (m *guideModel) requiresRole() bool {
 	// The role is only needed once the operator grants write or delete authority.
 	return m.scope > 0
@@ -357,11 +510,25 @@ func (m *guideModel) listRows() int {
 	return rows
 }
 
+// policyFooter describes the policy view keys.
+func (m *guideModel) policyFooter() string {
+	return keyHints(m.styles, m.windowWidth(), [][2]string{
+		{"↑/↓", m.bundle.T("keys.move")},
+		{"p", m.bundle.T("keys.back")},
+		{"q", m.bundle.T("keys.quit")},
+	})
+}
+
 func (m *guideModel) footer() string {
+	policyKey := m.bundle.T("keys.show_policy")
+	if m.showPolicy {
+		policyKey = m.bundle.T("keys.hide_policy")
+	}
 	return keyHints(m.styles, m.width, [][2]string{
 		{"tab", m.bundle.T("keys.section")},
 		{"↑/↓", m.bundle.T("keys.move")},
 		{"space", m.bundle.T("keys.toggle")},
+		{"p", policyKey},
 		{"q", m.bundle.T("keys.quit")},
 	})
 }

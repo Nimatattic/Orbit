@@ -185,6 +185,51 @@ func pad(s string, width int) string {
 	return s + strings.Repeat(" ", width-w)
 }
 
+// wrapLine soft-wraps one line to width display columns, breaking on spaces and
+// falling back to a hard break for long tokens such as action names.
+func wrapLine(s string, width int) []string {
+	if width <= 0 || lipgloss.Width(s) <= width {
+		return []string{s}
+	}
+	var out []string
+	remaining := s
+	for lipgloss.Width(remaining) > width {
+		cut := -1
+		used := 0
+		for i, r := range remaining {
+			rw := lipgloss.Width(string(r))
+			if used+rw > width {
+				break
+			}
+			used += rw
+			if r == ' ' {
+				cut = i
+			}
+		}
+		if cut <= 0 {
+			// No space to break on: cut exactly at the width.
+			used = 0
+			for i, r := range remaining {
+				rw := lipgloss.Width(string(r))
+				if used+rw > width {
+					cut = i - 1
+					break
+				}
+				used += rw
+			}
+			if cut <= 0 {
+				break
+			}
+		}
+		out = append(out, remaining[:cut])
+		remaining = strings.TrimLeft(remaining[cut:], " ")
+	}
+	if remaining != "" {
+		out = append(out, remaining)
+	}
+	return out
+}
+
 // keyHints renders the footer legend. Hints that would overflow the width are
 // dropped from the end, so the last row never gets cut mid-word.
 func keyHints(st styles, width int, pairs [][2]string) string {

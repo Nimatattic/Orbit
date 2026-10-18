@@ -322,5 +322,15 @@
   "perm.ssl.delete": "delete a certificate no resource uses",
   "perm.ssl.delete_task": "poll the asynchronous deletion task",
   "perm.ssl.deploy": "deploy a certificate through the unified strategy (--strategy=deploy)",
-  "perm.ssl.deploy_record": "poll the unified deploy record"
+  "perm.ssl.deploy_record": "poll the unified deploy record",
+  "guide.policy_title": "Custom policy JSON (paste-ready)",
+  "guide.policy_step1": "1. CAM console → Policies → Create custom policy",
+  "guide.policy_step2": "2. Choose \"create by policy syntax\"; the template content is replaced",
+  "guide.policy_step3": "3. Paste the JSON above into the policy content, name it and save",
+  "guide.policy_step4": "4. Attach the policy to the API sub-account (or its user group)",
+  "guide.policy_written": "policy written to {path}",
+  "keys.show_policy": "show policy JSON",
+  "keys.hide_policy": "hide policy JSON",
+  "guide.policy_steps": "how to paste",
+  "keys.back": "back to the guide"
 }

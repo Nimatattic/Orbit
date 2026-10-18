@@ -1,8 +1,8 @@
 package tencent
 
 import (
+	"encoding/json"
 	"sort"
-	"strings"
 )
 
 // PermissionTier groups actions by how much authority they carry, so an operator
@@ -205,8 +205,32 @@ func SelectPermissions(f PermissionFilter) []Permission {
 	return out
 }
 
-// PolicyDocument renders the selection as a ready-to-paste CAM policy.
-func PolicyDocument(f PermissionFilter) map[string]any {
+// Policy is a Tencent Cloud CAM custom policy document.
+//
+// The shape follows the official grammar
+// (https://cloud.tencent.com/document/product/598/10604):
+//
+//	policy    = { version, statement }
+//	statement = { effect, action, resource, condition? }
+//
+// There is no "sid" in Tencent Cloud's grammar (unlike AWS), so it is
+// deliberately omitted: the console validates the JSON and rejects unknown
+// structure.
+type Policy struct {
+	Version   string            `json:"version"`
+	Statement []PolicyStatement `json:"statement"`
+}
+
+// PolicyStatement is one statement of a CAM policy.
+type PolicyStatement struct {
+	Effect   string   `json:"effect"`
+	Action   []string `json:"action"`
+	Resource []string `json:"resource"`
+}
+
+// PolicyDocument renders the selection as a ready-to-paste CAM policy: one
+// statement per authority tier, so the operator can see the split and trim it.
+func PolicyDocument(f PermissionFilter) Policy {
 	grouped := map[PermissionTier][]string{}
 	order := []PermissionTier{}
 	for _, p := range SelectPermissions(f) {
@@ -216,17 +240,37 @@ func PolicyDocument(f PermissionFilter) map[string]any {
 		grouped[p.Tier] = append(grouped[p.Tier], p.Action)
 	}
 
-	statements := make([]any, 0, len(order))
+	statements := make([]PolicyStatement, 0, len(order))
 	for _, tier := range order {
-		statements = append(statements, map[string]any{
-			"sid":      "orbit-" + strings.ToLower(string(tier)),
-			"effect":   "allow",
-			"action":   grouped[tier],
-			"resource": []string{"*"},
+		actions := grouped[tier]
+		sort.Strings(actions)
+		statements = append(statements, PolicyStatement{
+			Effect:   "allow",
+			Action:   actions,
+			Resource: []string{"*"},
 		})
 	}
-	return map[string]any{
-		"version":   "2.0",
-		"statement": statements,
+	return Policy{Version: "2.0", Statement: statements}
+}
+
+// PolicyJSON renders the policy as indented JSON, ready to paste into the
+// console's "按策略语法创建" editor.
+func PolicyJSON(f PermissionFilter) (string, error) {
+	raw, err := json.MarshalIndent(PolicyDocument(f), "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(raw) + "\n", nil
+}
+
+// PolicyNameSuggestion is a starting name for the policy in the console.
+func PolicyNameSuggestion(f PermissionFilter) string {
+	switch f.MaxTier {
+	case TierWrite:
+		return "orbit-apply"
+	case TierDelete:
+		return "orbit-full"
+	default:
+		return "orbit-readonly"
 	}
 }
