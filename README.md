@@ -9,7 +9,8 @@
 - 方案与选型：[docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)
 - 真机验证步骤（M1）：[docs/VERIFY_M1.md](docs/VERIFY_M1.md)
 - **运维手册（安装 / cron / systemd / 权限 / 回滚 / 排错）**：[docs/OPERATIONS.md](docs/OPERATIONS.md)
-- CAM 最小权限策略（可直接粘贴）：[只读](docs/cam/readonly.json) · [执行](docs/cam/execute.json) · [含删除](docs/cam/delete.json)
+- CAM 最小权限策略（可直接粘贴，由代码生成）：[只读](docs/cam/readonly.json) · [执行](docs/cam/execute.json) · [含删除](docs/cam/delete.json)
+- 权限向导：`orbit account guide`（TUI，按云厂商/产品/使用范围生成最小权限清单）
 - 腾讯云 API 事实清单（逐条来源 + 待实测项）：[docs/TENCENT_API_NOTES.md](docs/TENCENT_API_NOTES.md)
 - 已确认决策与已接受风险：[DECISIONS.md](DECISIONS.md)
 
@@ -60,6 +61,45 @@ make release          # linux/amd64, linux/arm64, darwin/arm64 静态二进制
 TUI 只接管屏幕，日志与结果仍会落回终端（退出后打印文本结果，便于留痕）。`orbit clean` 的交互流程与 `update` 一致。
 
 界面采用全屏面板布局（圆角边框 + 标题嵌在顶边），底栏是按宽度自适应的快捷键提示；等待云端回报的行显示**转动的指示器 + 已等待秒数**，执行阶段顶部还有**进度条**。
+
+### 权限向导（`orbit account guide`）
+
+不知道这个账号到底要开哪些权限时，用它：
+
+```bash
+orbit account guide                # TUI：选云厂商、产品范围、使用范围，实时看清单
+orbit account guide --scope=read --products=cdn          # 纯文本，只读 + 仅 CDN
+orbit account guide --scope=full --policy > policy.json  # 直接输出可粘贴的 CAM 策略
+```
+
+```
+╭─ 1. 云厂商 ──────────────────────────────────────────────╮
+│▸ (•) 腾讯云                                              │
+│  ( ) 阿里云  （规划中）                                   │
+╰──────────────────────────────────────────────────────────╯
+╭─ 2. 产品范围 ────────────────────────────────────────────╮
+│  [x] SSL 证书服务  （必需）                               │
+│  [x] CDN                                                 │
+│  [x] EdgeOne（TEO）                                      │
+╰──────────────────────────────────────────────────────────╯
+╭─ 3. 使用范围 ────────────────────────────────────────────╮
+│  (•) 只读巡检  status / doctor / --dry-run，绝不写入      │
+│  ( ) 应用证书  update --yes                              │
+│  ( ) 完整（应用 + 清理）  clean --yes                     │
+╰──────────────────────────────────────────────────────────╯
+╭─ 需要 9 个权限 ──────────────────────────────────────────╮
+│read    sts:GetCallerIdentity        校验凭证归属         │
+│read    ssl:DescribeCertificates     列出证书池           │
+│…                                                        │
+╰──────────────────────────────────────────────────────────╯
+```
+
+- 三条轴任意组合：**云厂商** × **产品范围（SSL 必需 / CDN / EdgeOne）** × **使用范围（只读 / 应用 / 完整含清理）**，清单实时重算（只读 9 → 应用 11 → 完整 14 个 action）。
+- 每个 action 都标注**为什么需要它**（如"删除前导出证书材料"、"发起关联查询"），并区分 read / write / delete 三档。
+- 使用范围含写入或删除时，额外提示需要一次性的服务角色 `SSL_QCSLinkedRoleInReplaceLoadCertificate`。
+- `--scope` 取值非法会直接报错，不会静默当作"完整"——避免误开过大权限。
+
+权限清单的**唯一事实源是代码**（[`internal/cloud/tencent/permissions.go`](internal/cloud/tencent/permissions.go)），`docs/cam/*.json` 由它生成，并且有测试反射 SDK 接口做防漂移：任何新调用的腾讯云接口若没登记进权限表，测试会失败。
 
 ### 总控台（`orbit dash`）
 

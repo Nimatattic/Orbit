@@ -278,6 +278,24 @@ Orbit · 应用证书 · main                                          12s
 | 取消/中断 | `ctrl+c` 或 `esc` 会取消上下文；已经提交的变更不会回滚（云端无法回滚），未提交的不会执行 |
 | `--no-tui` | 强制纯文本模式（等同批处理/计划输出） |
 
+## 权限向导（`orbit account guide`）
+
+```bash
+./bin/orbit account guide                                   # TUI
+./bin/orbit account guide --scope=read --products=cdn       # 文本
+./bin/orbit account guide --scope=full --policy             # CAM 策略 JSON
+./bin/orbit account guide --scope=nope                      # 应报错（退出码 1）
+```
+
+| 检查项 | 期望 |
+| --- | --- |
+| 三条轴联动 | 只读 9 个 action → 应用 11 → 完整 14（全产品时）；取消 CDN/EdgeOne 后对应 action 消失 |
+| 必需项 | SSL 证书服务带「（必需）」，按空格无法取消 |
+| 用途说明 | 每条 action 都有一句中文用途，不出现 `perm.*` 原始键 |
+| 服务角色 | 只在「应用证书」及以上范围才显示 `SSL_QCSLinkedRoleInReplaceLoadCertificate` |
+| 取值校验 | `--scope` 非法值报错退出，不会静默按"完整"处理 |
+| 策略一致 | `--policy` 的输出与 `docs/cam/*.json` 中同档位的文件一致（有测试保证） |
+
 ## 总控台（`orbit dash`）
 
 ```bash

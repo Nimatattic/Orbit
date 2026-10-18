@@ -22,6 +22,7 @@ var commandKeys = map[string]string{
 	"add":     "account.add.short",
 	"remove":  "account.remove.short",
 	"test":    "account.test.short",
+	"guide":   "cmd.account.guide.short",
 	"show":    "config.show.short",
 	"path":    "config.path.short",
 	"set":     "config.set.short",
@@ -30,7 +31,8 @@ var commandKeys = map[string]string{
 // commandLongKeys maps command names to a long description key for the commands
 // that carry one.
 var commandLongKeys = map[string]string{
-	"dash": "cmd.dash.long",
+	"dash":  "cmd.dash.long",
+	"guide": "cmd.account.guide.long",
 }
 
 // flagKeys maps flag names to message keys.

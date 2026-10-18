@@ -37,11 +37,27 @@ ssh root@server 'chmod 755 /usr/local/bin/orbit && orbit version'
 
 `docs/cam/` 下有三份可直接粘贴到 CAM 控制台的策略，按用途递增：
 
-| 文件 | 覆盖动作 | 用途 |
+| 文件 | 动作数 | 用途 |
 | --- | --- | --- |
-| [`cam/readonly.json`](cam/readonly.json) | 14 个只读动作 + `sts:GetCallerIdentity` | `status` / `doctor` / `account test`，以及一切 `--dry-run` |
-| [`cam/execute.json`](cam/execute.json) | 只读 + 部署（`ssl:DeployCertificateInstance`、`cdn:ModifyDomainConfig`、`teo:ModifyHostsCertificate` 等） | `orbit update --ssl --yes` |
-| [`cam/delete.json`](cam/delete.json) | 执行 + 删除（`ssl:DeleteCertificates`、`ssl:DescribeDeleteCertificatesTaskResult`） | `orbit clean --ssl --yes` |
+| [`cam/readonly.json`](cam/readonly.json) | 9 | `status` / `doctor` / `account test`，以及一切 `--dry-run` |
+| [`cam/execute.json`](cam/execute.json) | 11 | 只读 + `orbit update --ssl --yes`（`cdn:ModifyDomainConfig`、`teo:ModifyHostsCertificate`） |
+| [`cam/delete.json`](cam/delete.json) | 14 | 执行 + `orbit clean --ssl --yes`（`ssl:DeleteCertificates` 等） |
+
+**这三份文件由代码生成，不要手改。** 需要调整时改
+[`internal/cloud/tencent/permissions.go`](../internal/cloud/tencent/permissions.go)，然后：
+
+```bash
+go test ./internal/cloud/tencent/ -run TestPolicyFilesMatch -update   # 重新生成
+go test ./internal/cloud/tencent/ -run TestPermissionTableCoversEverySDKCall   # 防漂移校验
+```
+
+不确定要开哪些权限时，用向导按需生成（还能看到每个权限的用途）：
+
+```bash
+orbit account guide                      # TUI：云厂商 × 产品范围 × 使用范围
+orbit account guide --scope=read --products=cdn
+orbit account guide --scope=full --policy > my-policy.json
+```
 
 **推荐两套子账号**：
 

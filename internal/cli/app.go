@@ -56,6 +56,8 @@ type App struct {
 	AllAccounts bool
 	Platforms   string
 	Products    string
+	GuideScope  string
+	GuidePolicy bool
 	Domains     string
 	DryRun      bool
 	Yes         bool

@@ -1,79 +1,34 @@
 {
-  "version": "2.0",
   "statement": [
     {
-      "sid": "orbit-identity",
-      "effect": "allow",
       "action": [
-        "sts:GetCallerIdentity"
-      ],
-      "resource": [
-        "*"
-      ]
-    },
-    {
-      "sid": "orbit-read-certificates",
-      "effect": "allow",
-      "action": [
-        "ssl:DescribeCertificates",
-        "ssl:DescribeCertificate",
-        "ssl:DescribeCertificateDetail"
-      ],
-      "resource": [
-        "*"
-      ]
-    },
-    {
-      "sid": "orbit-read-bindings",
-      "effect": "allow",
-      "action": [
+        "cdn:DescribeDomainsConfig",
         "ssl:CreateCertificateBindResourceSyncTask",
         "ssl:DescribeCertificateBindResourceTaskResult",
-        "ssl:DescribeCertificateBindResourceTaskDetail",
+        "ssl:DescribeCertificates",
         "ssl:DescribeHostCdnInstanceList",
-        "ssl:DescribeHostTeoInstanceList"
+        "ssl:DescribeHostTeoInstanceList",
+        "sts:GetCallerIdentity",
+        "teo:DescribeAccelerationDomains",
+        "teo:DescribeZones"
       ],
+      "effect": "allow",
       "resource": [
         "*"
-      ]
-    },
-    {
-      "sid": "orbit-read-products",
-      "effect": "allow",
-      "action": [
-        "cdn:DescribeDomains",
-        "cdn:DescribeDomainsConfig",
-        "cdn:DescribeCertDomains",
-        "teo:DescribeZones",
-        "teo:DescribeAccelerationDomains"
       ],
-      "resource": [
-        "*"
-      ]
+      "sid": "orbit-read"
     },
     {
-      "sid": "orbit-write-certificates",
-      "effect": "allow",
-      "action": [
-        "ssl:DeployCertificateInstance",
-        "ssl:DescribeHostDeployRecord",
-        "ssl:DescribeHostDeployRecordDetail",
-        "ssl:DeployCertificateRecordRetry"
-      ],
-      "resource": [
-        "*"
-      ]
-    },
-    {
-      "sid": "orbit-write-products",
-      "effect": "allow",
       "action": [
         "cdn:ModifyDomainConfig",
         "teo:ModifyHostsCertificate"
       ],
+      "effect": "allow",
       "resource": [
         "*"
-      ]
+      ],
+      "sid": "orbit-write"
     }
-  ]
+  ],
+  "version": "2.0"
 }

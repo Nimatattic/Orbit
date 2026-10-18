@@ -209,7 +209,8 @@ func (a *App) registerAccount(alias string) error {
 
 func (a *App) newAccountCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "account", Short: "account.short"}
-	cmd.AddCommand(a.newAccountListCmd(), a.newAccountAddCmd(), a.newAccountRemoveCmd(), a.newAccountTestCmd())
+	cmd.AddCommand(a.newAccountListCmd(), a.newAccountAddCmd(), a.newAccountRemoveCmd(),
+		a.newAccountTestCmd(), a.newAccountGuideCmd())
 	return cmd
 }
 
