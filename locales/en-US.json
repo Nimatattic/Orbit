@@ -340,5 +340,21 @@
   "keys.save": "save to file",
   "keys.save_confirm": "save",
   "guide.no_grant": "no grant needed",
-  "guide.policy_sources": "where the actions are documented:"
+  "guide.policy_sources": "where the actions are documented:",
+  "cmd.about.short": "Show build and environment information",
+  "cmd.about.long": "A fastfetch-style identity card: the ASCII logo next to build metadata, configuration paths, credential and audit status.",
+  "about.label.platform": "platform",
+  "about.label.accounts": "accounts",
+  "about.label.products": "products",
+  "about.label.locale": "locale",
+  "about.label.home": "data",
+  "about.label.config": "config",
+  "about.label.credentials": "credentials",
+  "about.label.audit": "audit",
+  "about.label.runtime": "runtime",
+  "about.none": "none",
+  "about.absent": "(not created)",
+  "about.insecure": "too permissive (want 0600)",
+  "about.no_runs": "no runs yet",
+  "about.runs": "{count} runs"
 }

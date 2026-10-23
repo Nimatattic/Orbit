@@ -18,6 +18,7 @@ var commandKeys = map[string]string{
 	"doctor":  "doctor.short",
 	"version": "version.short",
 	"dash":    "cmd.dash.short",
+	"about":   "cmd.about.short",
 	"list":    "account.list.short",
 	"add":     "account.add.short",
 	"remove":  "account.remove.short",
@@ -33,6 +34,7 @@ var commandKeys = map[string]string{
 var commandLongKeys = map[string]string{
 	"dash":  "cmd.dash.long",
 	"guide": "cmd.account.guide.long",
+	"about": "cmd.about.long",
 }
 
 // flagKeys maps flag names to message keys.

@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Crequency/orbit/internal/i18n"
 )
@@ -77,6 +78,9 @@ type GuideJob struct {
 	// PolicyHint tells the operator where a paste-ready policy lives.
 	PolicyHint string
 }
+
+// actionWidth is the column width reserved for the CAM action name.
+const actionWidth = 42
 
 // Sections the cursor can move through.
 const (
@@ -433,7 +437,15 @@ func (m *guideModel) permissionPanel(width int, perms []GuidePermission) string 
 		if p.NoGrant {
 			marker = m.styles.warn.Render("(" + m.bundle.T("guide.no_grant") + ") ")
 		}
-		line := tier + " " + fmt.Sprintf("%-44s", p.Action) + marker + m.styles.dim.Render(p.Purpose)
+		// One row per permission: truncate instead of letting lipgloss wrap the
+		// text, which would break the table on narrow terminals.
+		inner := width - 2
+		action := fmt.Sprintf("%-*s", actionWidth, truncate(p.Action, actionWidth))
+		purposeWidth := inner - 9 - actionWidth - lipgloss.Width(marker)
+		if purposeWidth < 8 {
+			purposeWidth = 8
+		}
+		line := tier + " " + action + " " + marker + m.styles.dim.Render(truncate(p.Purpose, purposeWidth))
 		if p.Experimental {
 			line += m.styles.dim.Render(" (" + m.bundle.T("guide.experimental") + ")")
 		}

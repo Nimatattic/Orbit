@@ -340,5 +340,21 @@
   "keys.save": "保存到文件",
   "keys.save_confirm": "保存",
   "guide.no_grant": "无需授权",
-  "guide.policy_sources": "权限出处（可自行核对）："
+  "guide.policy_sources": "权限出处（可自行核对）：",
+  "cmd.about.short": "显示版本与环境信息",
+  "cmd.about.long": "类似 fastfetch 的身份卡：展示 ASCII 标志、构建信息、配置路径、凭证与审计状态。",
+  "about.label.platform": "云平台",
+  "about.label.accounts": "账号",
+  "about.label.products": "产品",
+  "about.label.locale": "语言",
+  "about.label.home": "数据目录",
+  "about.label.config": "配置",
+  "about.label.credentials": "凭证",
+  "about.label.audit": "审计",
+  "about.label.runtime": "运行时",
+  "about.none": "无",
+  "about.absent": "（未创建）",
+  "about.insecure": "权限过宽（应为 0600）",
+  "about.no_runs": "尚未执行",
+  "about.runs": "{count} 次执行"
 }

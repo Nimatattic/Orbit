@@ -1,331 +1,541 @@
-# Orbit
+<div align="center">
 
-> 把「腾讯云 SSL 证书池」与「CDN 加速域名 / EdgeOne 站点域名」对齐：自动匹配并应用最优证书，巡检全景状态，清理再没有任何云资源使用的证书。
+```text
+         .-~~~~~~~-.
+      .-~           ~-.
+     /                 \
+    |         o         |
+     \                 /
+      ~-.           .-~
+         `-~~~~~~~-'
 
-命令：`orbit` ｜ 首批平台：腾讯云 ｜ 首批产品：**CDN + EdgeOne** ｜ module：`github.com/Crequency/orbit`
+  ___  ____  ____  ___ _____
+ / _ \|  _ \| __ )|_ _|_   _|
+| | | | |_) |  _ \ | |  | |
+| |_| |  _ <| |_) || |  | |
+ \___/|_| \_\____/|___|  |_|
 
-设计与事实依据：
+      cloud certificate orchestration
+```
 
-- 方案与选型：[docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)
-- 真机验证步骤（M1）：[docs/VERIFY_M1.md](docs/VERIFY_M1.md)
-- **运维手册（安装 / cron / systemd / 权限 / 回滚 / 排错）**：[docs/OPERATIONS.md](docs/OPERATIONS.md)
-- CAM 最小权限策略（可直接粘贴，由代码生成）：[只读](docs/cam/readonly.json) · [执行](docs/cam/execute.json) · [含删除](docs/cam/delete.json)
-- 权限向导：`orbit account guide`（TUI，按云厂商/产品/使用范围生成最小权限清单）
-- 腾讯云 API 事实清单（逐条来源 + 待实测项）：[docs/TENCENT_API_NOTES.md](docs/TENCENT_API_NOTES.md)
-- 已确认决策与已接受风险：[DECISIONS.md](DECISIONS.md)
+**Match certificates to your domains, apply them, and retire the leftovers — from the terminal.**
+
+[![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white)](go.mod)
+[![Platform](https://img.shields.io/badge/platform-Tencent%20Cloud-006EFF)](docs/TENCENT_API_NOTES.md)
+[![TUI](https://img.shields.io/badge/TUI-Bubble%20Tea-FF75B7)](https://github.com/charmbracelet/bubbletea)
+[![i18n](https://img.shields.io/badge/i18n-English%20%7C%20%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-4B8BBE)](locales)
+[![Status](https://img.shields.io/badge/status-alpha-orange)](docs/IMPLEMENTATION_PLAN.md)
+
+[![Stars](https://img.shields.io/github/stars/Nimatattic/Orbit?style=flat&color=yellow)](https://github.com/Nimatattic/Orbit/stargazers)
+[![Last commit](https://img.shields.io/github/last-commit/Nimatattic/Orbit)](https://github.com/Nimatattic/Orbit/commits/main)
+[![Issues](https://img.shields.io/github/issues/Nimatattic/Orbit)](https://github.com/Nimatattic/Orbit/issues)
+
+[Quick start](#quick-start) · [Installation](#installation) · [Usage](#usage-guide) · [Permissions](#permissions) · [How to dev](#how-to-dev) · [Docs](#documentation)
+
+</div>
 
 ---
 
-## 当前进度（M0 已完成）
+## Why Orbit
 
-| 里程碑 | 状态 |
+Most teams already automate the *easy* half of certificate management: ACME issues the
+certificate and something pushes it to the cloud. What is left is the part nobody wants to
+script — **pointing the right certificate at the right domain, and deleting the ones that no
+longer serve anything.**
+
+That is the gap Orbit fills. It reads the certificate pool and the live domain inventory,
+decides per domain which certificate *should* be bound, applies it, verifies that the change
+came back from the cloud, and — separately, behind four gates — removes certificates that no
+cloud resource references any more.
+
+```text
+1Panel / ACME ──▶ local dir ──▶ upload to cloud ──▶ ┌─────────────────────┐
+                                                    │ apply to domains    │ ◀── Orbit
+                                                    │ delete orphans      │ ◀── Orbit
+                                                    └─────────────────────┘
+```
+
+Orbit deliberately stops at the dotted line: it does not issue certificates and does not read
+`tccli` credentials. It is the missing step in *your* pipeline, not another CA client.
+
+## Features
+
+| | |
 | --- | --- |
-| M0 骨架：CLI、配置分层、凭证存储、i18n、退出码、匹配引擎、清理门禁、fake provider | ✅ 完成 |
-| M1 只读采集：腾讯云 SDK 接入（证书池 / CDN 域名 / EdgeOne 站点域名 / 关联查询） | ✅ 完成（回放测试覆盖；待你用真实账号按 [VERIFY_M1](docs/VERIFY_M1.md) 核对） |
-| M2 匹配引擎打磨（计划渲染、风险分级已可用） | 部分可用 |
-| M3 应用执行（`ModifyDomainConfig` / `ModifyHostsCertificate`） | ✅ 写入、异步轮询、回读复核、错误码提示、审计日志、分组并发 |
-| M4 清理执行（删除 + 证书材料备份 + 任务状态分类） | ⏳ 未开始 |
-| M5 TUI（多 Tab、账号多选、计划预览） | ✅ 完成（状态多 Tab 总览、账号多选、计划确认、执行进度与动态等待、`u`/`c` 直达） |
-| M6 交付（打包、cron/systemd、CAM 模板） | ⏳ 未开始 |
+| **Matching that respects RFC 6125** | Exact SANs, single-label wildcards (`*.example.com` matches `a.example.com`, never `a.b.example.com`), validity-aware ranking, deterministic tie-breaking. |
+| **Idempotent plans** | `update` builds a plan first; domains already holding the best certificate are marked *up to date* and never written twice. |
+| **Product-aware writes** | CDN uses a partial config update (`ModifyDomainConfig` on `Https.CertInfo.CertId`); EdgeOne uses `ModifyHostsCertificate` in `sslcert` mode. Groups run concurrently. |
+| **Read-back verification** | Every write is confirmed by polling the product until the domain reports the new certificate. A timeout is reported as `unverified`, never as a silent success. |
+| **Four gates before deletion** | Uploaded by you · superseded by another certificate · beyond the grace period · referenced by no cloud resource. Deletion is refused unless the evidence is complete. |
+| **Backup before delete** | Certificate, chain and private key (mode `0600`) plus a metadata record, written before the API call. |
+| **Append-only audit log** | One JSONL record per change plus a per-run summary. Never contains credentials. |
+| **Honest semantics** | Dry-run by default, `--yes` required to write, exit codes that distinguish *pending changes* from *partial failure* from *safety refusal*. |
+| **A real TUI** | Status overview, per-account console, permission guide, live apply progress with per-domain state. |
+| **Static binary** | `CGO_ENABLED=0`, one file, no runtime dependencies. English and 简体中文 at parity. |
 
-**现在能做什么**：真实腾讯云账号的只读采集（证书池 / CDN 域名 / EdgeOne 站点与域名 / 证书↔资源关联查询）、匹配与计划、清理候选；写入路径（CDN `ModifyDomainConfig`、EdgeOne `ModifyHostsCertificate`、SSL `DeployCertificateInstance`）已实现并带**回读复核**；另外还有配置与凭证管理、环境自检、多语言、以及完全不触网的 `--demo` 演示链路。
-**还不能做什么**：多 Tab TUI（M5）、审计日志与证书材料备份（M4）、`--strategy=deploy` 对 CDN（见 [VERIFY_M1](docs/VERIFY_M1.md) 已知边界）。
+## Quick start
 
----
-
-## 构建与运行
-
-工作区自带 Go 工具链（1.27.1）：
+No cloud account, no credentials, no network — the demo provider is fully offline:
 
 ```bash
-source ../.toolchains/env.sh
+git clone https://github.com/Nimatattic/Orbit.git
+cd Orbit
+make build
+
+./bin/orbit --demo status                # inventory + plan, read-only
+./bin/orbit --demo update --ssl          # TUI on a terminal, plan-only otherwise
+./bin/orbit --demo update --ssl --dry-run
+```
+
+```text
+╭─ Orbit · status overview ────────────────────────────────────────────────────────────────────╮
+│Multi-cloud certificate orchestration and inspection                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ registered accounts ────────────────────────────────────────────────────────────────────────╮
+│▌1 demo (4)▐                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ demo ───────────────────────────────────────────────────────────────────────────────────────╮
+│certificates 7 (uploaded 6 / in use 4 / unused 2) · resources 4 (unbound 2 · foreign 1)       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ to apply (4)   ─────────────────────────────────────────────────────────────────────────────╮
+│▸ [ ] CDN    static.example.com                       c-1002                                  │
+│  [ ] CDN    www.example.com                          c-1002                                  │
+│  [ ] TEO    api.example.com                          c-1003                                  │
+│  [ ] TEO    cdn.example.com                          c-1002                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ cleanup candidates (1)   ───────────────────────────────────────────────────────────────────╮
+│  [ ] SSL    1panel-test-example-com-2025             c-1005                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+
+↑/↓ move  ·  space toggle  ·  a all  ·  n none  ·  u apply  ·  c cleanup  ·  s list  ·  q quit
+```
+
+## Installation
+
+### Prebuilt static binaries
+
+```bash
+make release
+# dist/orbit-linux-amd64   dist/orbit-linux-arm64   dist/orbit-darwin-arm64
+
+scp dist/orbit-linux-amd64 root@server:/usr/local/bin/orbit
+ssh root@server 'chmod 755 /usr/local/bin/orbit && orbit version'
+```
+
+### From source
+
+Requires **Go 1.27+** and `make`. CGO is not needed.
+
+```bash
+git clone https://github.com/Nimatattic/Orbit.git
+cd Orbit
 make build            # -> bin/orbit
-make test             # 单元测试（全部离线，走 cloud/fake）
-make vet              # go vet
-make release          # linux/amd64, linux/arm64, darwin/arm64 静态二进制
+make install          # -> /usr/local/bin/orbit
 ```
 
-## 运行模式（由参数决定）
+> The Go module path is `github.com/Crequency/orbit`, so `go install` against the GitHub URL
+> does not work yet. Use the clone-and-build path above.
 
-| 你输入 | 行为 |
-| --- | --- |
-| `orbit dash` | **TUI 总控台**：登记多个账号时先**单选**一个账号，然后在同一界面里进入「应用证书 / 清理证书 / 状态总览 / 环境自检」，每次功能执行完自动回到总控台 |
-| `orbit`（无参数） | **状态总览 TUI**：每个（平台·账号）一个 Tab，展示证书/资源/待处理/可清理；`u`/`c` 直接跳到应用/清理 |
-| `orbit status`（终端下） | 同上；非终端时输出纯文本，逐账号容错（一个账号失败不影响其它） |
-| `orbit update --ssl`（终端下） | 登记多个账号时先出现**账号多选器**（空格勾选 / a 全选 / 回车确认）；选定后每个账号**进入 TUI**：扫描 → 变更确认页 → 执行页（逐条状态与动态等待）→ 结果页；`y` 执行、`n`/`esc` 取消 |
-| `orbit update --ssl --dry-run` | 只出计划，纯文本，**绝不写云端** |
-| `orbit update --ssl --yes` | CLI 批处理模式（cron / 脚本用），逐行进度 |
-| 非终端环境（无 TTY） | 自动降级为纯文本：无 `--yes` 时只出计划 |
-| `--no-tui` / `--json` | 强制纯文本 / 结构化输出 |
-
-TUI 只接管屏幕，日志与结果仍会落回终端（退出后打印文本结果，便于留痕）。`orbit clean` 的交互流程与 `update` 一致。
-
-界面采用全屏面板布局（圆角边框 + 标题嵌在顶边），底栏是按宽度自适应的快捷键提示；等待云端回报的行显示**转动的指示器 + 已等待秒数**，执行阶段顶部还有**进度条**。
-
-### 权限向导（`orbit account guide`）
-
-不知道这个账号到底要开哪些权限时，用它：
+### First steps
 
 ```bash
-orbit account guide                                      # TUI：选云厂商/产品/使用范围，按 p 直接看策略 JSON
-orbit account guide --scope=read --products=cdn          # 纯文本，只读 + 仅 CDN
-orbit account guide --scope=full --policy > policy.json  # 只输出 JSON（stdout 纯净，可管道）
-orbit account guide --scope=full --policy-out p.json     # 写到文件（0600）
+orbit account add --alias main      # secrets are read without echo and stored 0600
+orbit doctor                        # config, credentials, access and locale self-check
+orbit account test --accounts=main  # per-product probes and credential identity
+orbit about                         # build, paths, credential and audit status
 ```
 
-```
-╭─ 1. 云厂商 ──────────────────────────────────────────────╮
-│▸ (•) 腾讯云                                              │
-│  ( ) 阿里云  （规划中）                                   │
-╰──────────────────────────────────────────────────────────╯
-╭─ 2. 产品范围 ────────────────────────────────────────────╮
-│  [x] SSL 证书服务  （必需）                               │
-│  [x] CDN                                                 │
-│  [x] EdgeOne（TEO）                                      │
-╰──────────────────────────────────────────────────────────╯
-╭─ 3. 使用范围 ────────────────────────────────────────────╮
-│  (•) 只读巡检  status / doctor / --dry-run，绝不写入      │
-│  ( ) 应用证书  update --yes                              │
-│  ( ) 完整（应用 + 清理）  clean --yes                     │
-╰──────────────────────────────────────────────────────────╯
-╭─ 需要 9 个权限 ──────────────────────────────────────────╮
-│read    sts:GetCallerIdentity        校验凭证归属         │
-│read    ssl:DescribeCertificates     列出证书池           │
-│…                                                        │
-╰──────────────────────────────────────────────────────────╯
+`orbit about` is the fastfetch-style identity card:
+
+```text
+         .-~~~~~~~-.           Orbit v0.1.0
+      .-~           ~-.        a1b2c3d · 2026-10-18T04:00:00Z
+     /                 \       ──────────────────────────────────────────
+    |         o         |      platform     Tencent Cloud
+     \                 /       accounts     2 (main, backup)
+      ~-.           .-~        products     ssl, cdn, teo
+         `-~~~~~~~-'           locale       en-US
+                               data         ~/.orbit
+  ___  ____  ____  ___ _____   config       ~/.orbit/config.yaml
+ / _ \|  _ \| __ )|_ _|_   _|  credentials  ~/.orbit/credentials.yaml  0600
+| | | | |_) |  _ \ | |  | |    audit        ~/.orbit/audit/audit.jsonl  12 runs
+| |_| |  _ <| |_) || |  | |    runtime      go1.27.1 linux/amd64
+ \___/|_| \_\____/|___|  |_|
 ```
 
-- 三条轴任意组合：**云厂商** × **产品范围（SSL 必需 / CDN / EdgeOne）** × **使用范围（只读 / 应用 / 完整含清理）**，清单实时重算（只读 9 → 应用 11 → 完整 14 个 action）。
-- 每个 action 都标注**为什么需要它**（如"删除前导出证书材料"、"发起关联查询"），并区分 read / write / delete 三档。
-- 使用范围含写入或删除时，额外提示需要一次性的服务角色 `SSL_QCSLinkedRoleInReplaceLoadCertificate`。
-- `--scope` 取值非法会直接报错，不会静默当作"完整"——避免误开过大权限。
+## Usage Guide
 
-**按 `p` 进入策略视图**：完整屏幕显示可直接复制的自定义策略 JSON（可滚动），上方是控制台粘贴步骤：
+### Modes
 
-```
-╭─ 粘贴步骤 ───────────────────────────────────────────────╮
-│1. 访问管理控制台 → 策略 → 新建自定义策略                 │
-│2. 选择「按策略语法创建」，模板任意（内容会被替换）        │
-│3. 把上面的 JSON 粘贴到「策略内容」，命名后保存            │
-│4. 把该策略关联到 API 子账号（或它所在的用户组）           │
-╰──────────────────────────────────────────────────────────╯
-╭─ 自定义策略 JSON（可直接粘贴）  orbit-readonly ───────────╮
-│{                                                         │
-│  "version": "2.0",                                        │
-│  "statement": [                                           │
-│    {                                                      │
-│      "effect": "allow",                                   │
-│      "action": ["cdn:DescribeDomainsConfig", …],          │
-│      "resource": ["*"]                                    │
-│    }                                                      │
-│  ]                                                        │
-│}                                                         │
-╰──────────────────────────────────────────────────────────╯
-```
+Orbit decides how to behave from the flags *and* the terminal:
 
-在策略视图里按 **`w`** 可以把 JSON 存到文件：
-
-```
-╭─ 保存到文件 ─────────────────────────────────────────────╮
-│路径（回车保存）： > ./orbit-account-policy.json           │
-╰──────────────────────────────────────────────────────────╯
-enter 保存  ·  esc 取消
-```
-
-- 默认路径 `./orbit-account-policy.json`，可直接编辑；输入以 `/` 结尾（或指向已存在的目录）时，会自动拼上默认文件名；
-- 支持 `~/` 展开，父目录不存在会自动创建，文件权限 0600；
-- 保存成功后显示**绝对路径**的确认行；失败（如无写权限）会留在输入框里让你改，不会静默丢弃；
-- 输入框打开时所有按键都进入输入，所以像 `q`/`p`/`w` 这样的字符也能正常出现在路径里（`esc` 取消、`ctrl+c` 退出）。
-
-策略里的 action 全部来自腾讯云官方接口列表（可自行核对）：
-
-| 服务 | 官方接口列表 |
+| You run | What happens |
 | --- | --- |
-| `ssl` | [SSL 证书](https://cloud.tencent.com/document/product/598/98168) |
-| `cdn` | [内容分发网络 CDN](https://cloud.tencent.com/document/product/598/98110) |
-| `teo` | [边缘安全加速平台 EO](https://cloud.tencent.com/document/product/598/99327) |
+| `orbit` / `orbit status` on a TTY | Full-screen TUI, one tab per account |
+| `orbit update --ssl` on a TTY | TUI: scan → plan → confirm with `y` → live progress |
+| `orbit update --ssl --yes` | Batch mode: writes without prompting (cron, systemd) |
+| `orbit update --ssl --dry-run` | Plan only, never writes |
+| any command without a TTY | Plain text; without `--yes`, `update` only prints the plan |
+| `--no-tui` / `--json` | Force text / structured output |
 
-**`sts:GetCallerIdentity` 不在策略里**：身份查询不需要授权（你的账号在没有任何 `sts` 授权时也一直能查到归属），而 CAM 控制台遇到未知 action 会拒绝整份策略。它在向导里仍会显示，但标注为「无需授权」。
+### Commands
 
-JSON 遵循[官方策略语法](https://cloud.tencent.com/document/product/598/10604)：`policy = {version, statement}`、`statement = {effect, action, resource[, condition]}`。**注意腾讯云的 statement 结构里没有 `sid`**（与 AWS 不同），所以生成时特意不含该字段——控制台会校验 JSON，多余字段有被拒风险。策略名按范围建议为 `orbit-readonly` / `orbit-apply` / `orbit-full`。
-
-> 也可以直接附加官方预设策略（控制台「策略 → 预设策略」按产品名搜索），一键完成但粒度更粗——例如产品的全读写策略会连带授予该产品其它接口权限。要最小权限就用上面生成的 JSON。
-
-权限清单的**唯一事实源是代码**（[`internal/cloud/tencent/permissions.go`](internal/cloud/tencent/permissions.go)），`docs/cam/*.json` 由它生成，并且有测试反射 SDK 接口做防漂移：任何新调用的腾讯云接口若没登记进权限表，测试会失败。
-
-### 总控台（`orbit dash`）
-
-面向"人坐在终端前操作"的场景：一个账号、一块屏幕、所有功能。
-
-```
-╭─ Orbit · 总控台 ─────────────────────────────────────────────╮
-│账号 demo · 产品 cdn, teo  更新于 12:33:53                    │
-╰──────────────────────────────────────────────────────────────╯
-╭─ 概览 ───────────────────────────────────────────────────────╮
-│证书 7（上传 6 / 在用 4 / 未用 2） · 资源 4（未绑定 2）         │
-│待处理 4 · 可清理 1 · 告警 0                                  │
-╰──────────────────────────────────────────────────────────────╯
-╭─ 功能 ───────────────────────────────────────────────────────╮
-│▸ 应用证书  4 条待处理                                        │
-│  清理证书  1 条候选                                          │
-│  状态总览（全部账号）                                        │
-│  环境自检                                                    │
-╰──────────────────────────────────────────────────────────────╯
-↑/↓ 移动  ·  enter 执行  ·  d 自检  ·  r 重扫  ·  q 退出
-```
-
-- **多账号时先单选**：`orbit dash` 会先弹单选列表（`↑/↓` + 回车）确定要管理哪个账号；用 `--accounts=<别名>` 可跳过。
-- `enter` 执行当前条目（也可按 `1`–`4` 直接选），执行完**回到总控台**，概览会重新扫描。
-- `d` 展开/收起环境自检（凭证归属、SSL/CDN/EdgeOne 可达性、服务角色授权）；自检结果会被缓存，`r` 才会重测。
-- 账号不可用（凭证缺失等）时**仍然进得去**：失败会显示在「概览」和「环境自检」里，此时只允许进入只读的「状态总览」。
-- 需要交互式终端；非 TTY 下会明确报错（脚本环境请用 `orbit status` / `update` / `clean`）。
-
-### 总览页的多选操作
-
-`orbit` / `orbit status` 的待处理与可清理列表支持逐条勾选后再执行：
-
-| 按键 | 作用 |
+| Command | Purpose |
 | --- | --- |
-| `↑`/`↓`（或 `j`/`k`） | 在当前列表内移动选择框 |
-| `space` | 勾选 / 取消勾选当前行 |
-| `a` | 全选当前列表 |
-| `n` | 取消全选 |
-| `s` | 在「待处理」与「可清理」两个列表间切换焦点 |
-| `u` / `enter` | 对**勾选的**待处理条目生成应用计划（未勾选任何条目 = 全部） |
-| `c` | 对**勾选的**可清理条目执行清理（未勾选 = 全部） |
-| `tab` / `1-9` | 切换账号 |
-| `r` | 重新扫描当前账号 |
-| `q` / `esc` | 退出 |
+| `orbit` | Status overview across all accounts (TUI on a terminal) |
+| `orbit dash` | Console for one account: apply, clean, overview, self-test |
+| `orbit status` | Certificate and resource inventory, pending changes, cleanup candidates |
+| `orbit update --ssl` | Match certificates to domains and apply them |
+| `orbit clean --ssl` | Delete certificates that no cloud resource uses |
+| `orbit account add \| list \| remove \| test` | Manage credentials and verify access |
+| `orbit account guide` | Choose platform/products/scope → minimal permission list + paste-ready policy |
+| `orbit doctor` | Environment self-check |
+| `orbit config show \| set` | Inspect and change configuration |
+| `orbit about` | Identity card: logo, build, paths, audit status |
+| `orbit version` | Version, commit and build date |
 
-## 快速上手（不触网，用演示数据）
+### The console — `orbit dash`
+
+One account, one screen, every action. The console reopens after each function, so a session
+reads as *apply → back → clean → back → quit*. If an account is unusable (missing credential),
+the console still opens and shows the failure instead of failing at the door.
+
+```text
+╭─ Orbit · console ────────────────────────────────────────────────────────────────────────────╮
+│account demo · products cdn, teo  updated 04:03:26                                            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ overview ───────────────────────────────────────────────────────────────────────────────────╮
+│certificates 7 (uploaded 6 / in use 4 / unused 2) · resources 4 (unbound 2 · foreign 1)       │
+│to apply 4 · cleanup candidates 1 · warnings 0                                                │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ functions ──────────────────────────────────────────────────────────────────────────────────╮
+│▸ Apply certificates  4 pending                                                               │
+│  Clean certificates  1 candidates                                                            │
+│  Status overview (all accounts)                                                              │
+│  Environment self-test                                                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+
+↑/↓ move  ·  enter run  ·  d checks  ·  r rescan  ·  q quit
+```
+
+### The permission guide — `orbit account guide`
+
+Stop guessing which CAM actions to grant. Choose the vendor, the products and how far you want
+Orbit to go; the guide prints the exact action list, why each one is needed, and a policy
+document you can paste into **CAM console → Policies → Create custom policy → by policy
+syntax**.
 
 ```bash
-# 环境自检
-./bin/orbit --demo doctor
-
-# 查看演示账号的证书/资源/待办概览
-./bin/orbit --demo status
-./bin/orbit --demo status --json
-
-# 生成「应用证书」计划（默认只出计划，绝不写云端）
-./bin/orbit --demo update --ssl
-
-# 真正执行（对演示数据是内存写，不会碰腾讯云）
-./bin/orbit --demo update --ssl --yes
-
-# 清理计划：只列候选，并给出每一张被跳过的原因
-./bin/orbit --demo clean --ssl
+orbit account guide                                  # TUI: p shows the JSON, w saves it
+orbit account guide --scope=read --products=cdn      # plain text
+orbit account guide --scope=full --policy > policy.json
 ```
 
-演示数据里刻意包含了这些场景，便于核对判定逻辑：
+```text
+╭─ 3. Usage level ─────────────────────────────────────────────────────────────────────────────╮
+│  (•) Inspection only  status / doctor / --dry-run, never writes                              │
+│  ( ) Apply certificates  update --yes: deploy certificates to domains                        │
+│  ( ) Full (apply + cleanup)  clean --yes: delete certificates no resource uses               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ 9 permissions needed ───────────────────────────────────────────────────────────────────────╮
+│read    cdn:DescribeDomainsConfig                  read CDN domains and their HTTPS certifica…│
+│read    ssl:CreateCertificateBindResourceSyncTask  start the "which resources use this certif…│
+│read    ssl:DescribeCertificates                   list the certificate pool for matching and…│
+│read    sts:GetCallerIdentity                      (no grant needed) verify which account the…│
+│… 2 more, scroll down                                                                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+tab list  ·  ↑/↓ move  ·  space toggle  ·  p show policy JSON  ·  q quit
+```
 
-| 场景 | 期望行为 |
-| --- | --- |
-| `www.example.com` 绑定了一张已过期证书 | 计划中标记为**高风险**应用，目标为新证书 |
-| `static.example.com` 未绑定证书 | 由泛域名证书 `*.example.com` 匹配，**低风险**首次绑定 |
-| EdgeOne `cdn.example.com` 使用 EdgeOne 免费证书（`Mode=eofreecert`） | 默认替换为最优证书；`--dry-run` 或 `edgeone.replace_free_cert=false` 时只报告 |
-| `test.example.com` 新旧两张证书、旧的无任何引用 | 旧证书成为清理候选；新的因"未被取代"被保留 |
-| 腾讯云签发的免费证书（`From=trustasia`） | **永不进入清理候选**（G1 只允许 upload） |
-| 托管中的证书（`HostingStatus=0`） | 保留 |
+Every grantable action cites the official Tencent Cloud interface list it comes from
+(`ssl`, `cdn`, `teo`). `sts:GetCallerIdentity` appears in the list but is **never written into
+the policy**: it needs no grant, and CAM rejects a document containing an unknown action.
+Ready-made policies live in [`docs/cam/`](docs/cam).
 
-## 接入真实账号（M1 之后可用）
+### Applying certificates — `orbit update`
 
 ```bash
-# 交互式录入（SecretKey 不回显），凭证写入 ~/.orbit/credentials.yaml（0600）
-./bin/orbit account add --alias main
-
-# 非交互（CI / 手工准备）
-printf 'AKIDxxx\nSECRETxxx\n' | ./bin/orbit account add --alias hk --from-stdin
-
-./bin/orbit account list
-./bin/orbit account test --accounts=main             # 按 SSL/CDN/EdgeOne 逐产品探测，并显示凭证归属
-./bin/orbit account test --accounts=main --products=teo   # 只复查某一个产品
-./bin/orbit doctor
+orbit update --ssl --dry-run                                  # review the plan
+orbit update --ssl --accounts=main --domains=www.example.com --yes
+orbit update --ssl --all-accounts --yes --json --no-progress  # cron
 ```
 
-**Orbit 不会读取 `~/.tccli/*.credential`**（决策 A1）。凭证只来自：环境变量注入、`~/.orbit/credentials.yaml`（强制 0600，权限过宽直接拒绝启动）。
+Groups *(product × target certificate × strategy)* run concurrently; results are printed in
+group order so a cron log stays diff-able. Each domain reports one of:
 
-cron 推荐用环境变量注入，配置文件里只写变量名：
+| Result | Meaning |
+| --- | --- |
+| `[ok]` | Written **and** confirmed by reading the product back |
+| `[unverified]` | Write accepted, but read-back did not confirm within the budget — check `orbit status`, do not blindly re-run |
+| `[failed]` | The cloud rejected the call; error code plus an actionable hint are printed |
+
+### Cleaning up — `orbit clean`
+
+```bash
+orbit clean --ssl --dry-run            # candidates and the reason for every skip
+orbit clean --ssl --yes --older-than=7d
+```
+
+A certificate is only deleted when **all four gates** pass, the cloud's binding query returned
+complete evidence, and the backup was written. Everything else is reported as a skipped
+candidate with its reason — never silently ignored.
+
+### TUI keys
+
+| Key | Action |
+| --- | --- |
+| `↑` `↓` / `j` `k` | Move the cursor |
+| `space` | Toggle the row under the cursor |
+| `a` / `n` | Select all / clear the selection |
+| `s` | Switch between the *to apply* and *cleanup* lists |
+| `u` / `enter` | Apply the selected changes (nothing selected = all) |
+| `c` | Clean the selected candidates (nothing selected = all) |
+| `tab` / `1`–`9` | Switch account |
+| `r` | Rescan the current account |
+| `p` / `w` | (guide) Show the policy JSON / save it to a file |
+| `q` / `esc` | Quit / cancel without writing |
+
+### Exit codes
+
+Designed for cron and CI:
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success, including no-op runs and dry-runs |
+| `1` | Fatal error (bad config, auth failure, unexpected cloud error) |
+| `2` | Partial failure — some changes succeeded, some did not |
+| `3` | Pending changes detected (`--fail-on-changes`) |
+| `4` | Refused by a safety gate (incomplete evidence, ambiguous account, missing role) |
+
+```bash
+# Alert when the weekly plan is non-empty, without writing anything:
+orbit update --ssl --all-accounts --dry-run --fail-on-changes --json --no-progress
+```
+
+## Configuration
+
+Everything lives in `~/.orbit/` (override with `ORBIT_HOME`):
+
+| Path | Contents | Mode |
+| --- | --- | --- |
+| `config.yaml` | Accounts, products, concurrency, cleanup policy | `0644` |
+| `credentials.yaml` | Secrets (**never** read from `tccli`) | `0600` enforced |
+| `audit/audit.jsonl` | Append-only change log | `0600` |
+| `backups/<account>/<cert>-<stamp>/` | `cert.pem`, `chain.pem`, `key.pem`, `meta.json` | dir `0700`, key `0600` |
+| `cache/` | Reserved for status caching | — |
 
 ```yaml
+language: en-US
+defaults:
+  products: [cdn, teo]
+  concurrency:
+    changes: 2            # write groups in flight
+  clean:
+    older-than: 7d
+    require-full-evidence: true
+  edgeone:
+    replace-free-cert: true
 platforms:
   tencent:
     accounts:
       - alias: main
         credential:
-          source: env
-          secret_id_env: ORBIT_TENCENT_MAIN_SECRET_ID
-          secret_key_env: ORBIT_TENCENT_MAIN_SECRET_KEY
-        products: [cdn, teo]
+          source: env     # store | env | file
+          secret-id-env: ORBIT_TENCENT_MAIN_SECRET_ID
+          secret-key-env: ORBIT_TENCENT_MAIN_SECRET_KEY
 ```
 
-## 配置
+Configuration precedence is local file → global file → defaults; `--local` / `--global` choose
+which file `orbit config set` writes.
 
-分层（高优先级在前）：命令行 flag → `ORBIT_*` → `--config <path>` → `./.orbit.yaml` → `~/.orbit/config.yaml` → 内置默认值。
+## Permissions
 
-```bash
-./bin/orbit config --global language=en-US     # 切换语言（zh-CN / en-US）
-./bin/orbit config --local  defaults.clean.older_than=3d
-./bin/orbit config show
-./bin/orbit config path
-```
+Three least-privilege tiers, generated from the code and guarded by a test that reflects over
+the provider's SDK interfaces:
 
-`~/.orbit/` 布局：`config.yaml`、`credentials.yaml`(0600)、`cache/`、`audit/`、`backups/`。
-
-### 审计日志
-
-每次执行（`update --yes`、`clean --yes`，以及 TUI 流程）都会向 `~/.orbit/audit/audit.jsonl` 追加记录：一条变更一行（时间、run_id、命令、账号、产品、域名、策略、变更前后证书 ID、结果 `ok/unverified/failed`、错误码），末尾一条汇总（成功/未确认/失败计数）。文件权限 0600，**从不记录凭证**。用 `jq` 就能查：
-
-```bash
-jq -c 'select(.kind=="change" and .result=="failed")' ~/.orbit/audit/audit.jsonl
-jq -c 'select(.kind=="summary")' ~/.orbit/audit/audit.jsonl | tail -5
-```
-
-### 删除前备份
-
-`clean` 在删除任何证书之前，会在 `~/.orbit/backups/<账号>/<证书ID>-<时间戳>/` 下写入：
-
-| 文件 | 权限 | 内容 |
+| File | Actions | Use it for |
 | --- | --- | --- |
-| `cert.pem` | 0644 | 服务器证书（如云端允许导出） |
-| `chain.pem` | 0644 | 根证书链（如可得） |
-| `key.pem` | **0600** | 私钥（如云端允许导出；托管证书通常不可导出） |
-| `meta.json` | 0600 | 证书 ID、别名、域名、SAN、到期时间、来源、被谁取代、G2 证据、材料是否导出、run_id |
+| [`docs/cam/readonly.json`](docs/cam/readonly.json) | 8 | `status`, `doctor`, `account test`, every `--dry-run` |
+| [`docs/cam/execute.json`](docs/cam/execute.json) | 10 | `orbit update --ssl --yes` |
+| [`docs/cam/delete.json`](docs/cam/delete.json) | 13 | `orbit clean --ssl --yes` |
 
-材料无法导出时**仍会写元数据**并把证书 ID 列出来提示你（design 见 DECISIONS：1Panel 仍是证书源头，元数据是可接受的兜底）。
+Recommended: a **read-only** API account on the machine that inspects, and a separate
+**execute** account on the machine that writes. One console-side grant is also required: the
+service role `SSL_QCSLinkedRoleInReplaceLoadCertificate`.
 
-语言优先级：`--lang` → `ORBIT_LANG` → 配置 `language` → `$LANG` → `zh-CN`。`--json` 输出与错误码**不做翻译**。
+## Safety model
 
-## 退出码契约
+- **Dry-run by default.** Writing requires `--yes`; without a TTY the plan is printed and the
+  process exits `0`.
+- **Plans are idempotent** and explain every row.
+- **Deletes are gated, evidenced and backed up** — see [Features](#features).
+- **Refusals are loud.** Incomplete evidence, ambiguous accounts, a missing service role: all
+  exit `4` rather than doing something plausible.
+- **The audit log is append-only** and records before/after certificate IDs, so "what changed
+  last Tuesday" is answerable without the cloud.
 
-| 码 | 含义 |
+## How to Dev
+
+```bash
+source ../.toolchains/env.sh     # if you use the workspace-managed toolchain
+make build                       # bin/orbit
+make test                        # full suite, fully offline
+make vet                         # go vet
+make lint                        # vet + golangci-lint when installed
+make release                     # three static binaries into dist/
+```
+
+The test suite never touches the network. The cloud is reached through narrow
+`sslAPI` / `cdnAPI` / `teoAPI` / `stsAPI` interfaces, which tests implement with fakes:
+pagination, retries, half-open poll loops, permission errors and connection reuse are all
+replayed locally. TUI screens are Bubble Tea models, so their state machines are unit-tested
+without a terminal.
+
+| Package | What is covered |
 | --- | --- |
-| 0 | 成功（含"无变更"、"演练完成"） |
-| 1 | 致命错误（配置 / 凭证 / 参数 / 未实现的 provider） |
-| 2 | 部分失败（有计划内条目执行失败） |
-| 3 | 计划模式存在待执行变更（仅 `--fail-on-changes`） |
-| 4 | 安全闸门拒绝执行（证据不完整、账号歧义、服务角色未授权） |
+| `internal/core` | Matching, ranking, plan building, cleanup gates |
+| `internal/cloud/tencent` | SDK interaction, error mapping, permission table, policy generation |
+| `internal/render/tui` | Model state machines, layout geometry (including CJK widths) |
+| `internal/cli` | Flags, mode selection, output formats, backups, audit |
+| `internal/config`, `internal/credential`, `internal/i18n` | Merge precedence, secret storage, catalogue parity |
 
-## 安全模型
+Working on the UI? `--demo` gives you a complete fake account with certificates, domains,
+pending changes and cleanup candidates:
 
-- `status` / `doctor` / `account test` 永远只读。
-- `update` / `clean` 默认**只出计划**；`--yes` 才写云端；`--dry-run` 永不写。
-- 非 TTY 且未给 `--yes` 时**不写云端**，退出码 0（`--fail-on-changes` 时为 3）。
-- 清理四道闸门（全部通过才允许删除）：① 只处理 `FilterSource=upload`；② 关联查询证据必须完整且为 0（`--permit-partial-scan` 可放宽，会打印警告）；③ 每个覆盖域名都必须已有更优证书；④ 超过宽限期（默认 7 天）、不在保护名单、非免费、非托管。
-- 删除前强制写备份（M0 只备份元数据，M4 补齐证书材料）。
-- v1 的清理范围是**全部 upload 证书**，不含别名/标签/域名白名单；由此带来的已接受风险见 [DECISIONS.md §3.1](DECISIONS.md)。
-
-## 目录结构
-
+```bash
+./bin/orbit --demo status
+./bin/orbit --demo update --ssl --progress
+./bin/orbit --demo dash
 ```
-cmd/orbit/          入口：装配 + os.Exit
-internal/cli/       命令树、flag、TTY 判定、退出码映射、错误消息键翻译
-internal/config/    ~/.orbit 与 ./.orbit.yaml 的分层合并、校验
-internal/credential/凭证存储（0600 强制）与环境变量解析
-internal/core/      领域模型、匹配选优、计划、清理门禁（纯函数，重点测试）
-internal/cloud/     Provider 接口 + tencent(M1) + fake(演示/测试)
-internal/render/    纯文本渲染（JSON 由 cli 直接编码）
-internal/i18n/      语言协商与消息渲染
-locales/            嵌入的语言包（zh-CN、en-US）
-docs/               方案与腾讯云事实清单
+
+## Structure
+
+```text
+cmd/orbit/                 entry point (thin main)
+internal/
+  cli/                     commands, flags, mode selection, output, about card
+  core/                    pure domain logic: model, matching, plan, safety gates
+  cloud/                   Provider interface + offline demo provider
+    tencent/               Tencent Cloud: SSL, CDN, EdgeOne, STS; permissions & policies
+  render/
+    plain/                 text output for scripts
+    tui/                   Bubble Tea screens: console, status, run, guide, picker
+  audit/                   append-only JSONL run log
+  config/                  layered config, paths, defaults
+  credential/              secret storage (0600) and resolution
+  i18n/                    bundle + locale negotiation (en-US, zh-CN)
+  exitcode/                exit-code contract and error wrapping
+  tty/  version/           terminal detection, build metadata
+locales/                   embedded message catalogues (key parity enforced by test)
+docs/                      design, operations, API notes, verification guides, CAM policies
+scripts/                   cron / systemd examples
+testdata/                  fixtures
 ```
+
+## Documentation
+
+| Document | What it covers |
+| --- | --- |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Install, cron/systemd, permissions, rollback, troubleshooting |
+| [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | Architecture, milestones, interface inventory |
+| [docs/TENCENT_API_NOTES.md](docs/TENCENT_API_NOTES.md) | Verified cloud behaviour and every open question |
+| [docs/VERIFY_M1.md](docs/VERIFY_M1.md) | Step-by-step verification against a real account |
+| [DECISIONS.md](DECISIONS.md) | Decision log: every non-obvious choice and its reason |
+
+## Roadmap
+
+- [x] **M0–M2** — skeleton, read-only inventory against a real account, matching engine
+- [x] **M3–M4** — apply with read-back verification, gated cleanup with backups and audit
+- [x] **M5** — TUI: overview with tabs, per-account console, permission guide
+- [x] **M6** — static releases, operations manual, CAM templates, `orbit about`
+- [ ] Additional providers (Alibaba Cloud, AWS)
+- [ ] Per-domain certificate pairs (RSA + SM2) instead of a single binding
+- [ ] `orbit restore` — re-upload a certificate straight from `~/.orbit/backups`
+- [ ] CI (vet + tests + release) and signed tags
+
+## FAQ
+
+<details>
+<summary><b><code>clean</code> refuses to run — why?</b></summary>
+
+Deletion needs complete evidence. If a product could not be scanned (no permission, service not
+enabled), `clean` exits `4` instead of guessing. Fix the permission, or explicitly accept the
+risk with `--permit-partial-scan`.
+</details>
+
+<details>
+<summary><b>Why is <code>sts:GetCallerIdentity</code> missing from the generated policy?</b></summary>
+
+Because it needs no grant, and CAM rejects a policy containing an unknown action — one bad
+entry invalidates the whole document. The identity probe works without it.
+</details>
+
+<details>
+<summary><b>What does <code>[unverified]</code> mean?</b></summary>
+
+The write was accepted but the product did not report the new certificate within the read-back
+budget (2 minutes). The change is probably applied; confirm with `orbit status` instead of
+re-running blindly.
+</details>
+
+<details>
+<summary><b>A CDN domain fails with <code>FailedOperation.CdnConfigError</code></b></summary>
+
+The usual cause is that CDN acceleration is switched off for that domain. Enable it under
+domain management in the console, then retry. Orbit maps the cloud message to that hint.
+</details>
+
+<details>
+<summary><b>Why does Orbit not read my <code>tccli</code> credentials?</b></summary>
+
+Deliberate: Orbit keeps its own store with `0600` and refuses to start when the file is more
+permissive. Silently sharing another tool's credential cache is how secrets end up in the wrong
+logs.
+</details>
+
+## Contributing
+
+Issues and pull requests are welcome. Before opening one:
+
+1. `make build && make test && make vet` must pass.
+2. Keep the layering: pure logic in `internal/core`, cloud specifics in `internal/cloud`,
+   presentation in `internal/render`.
+3. If you touch a cloud API, update the permission table — a test reflects over the SDK
+   interfaces and reports exactly which action is undocumented.
+4. If you change user-visible text, add the key to **both** locales; parity is enforced.
+5. Prefer a test over a comment. The suite is offline and fast.
+
+## Security
+
+- No credentials, tokens or private keys are stored in this repository.
+- `~/.orbit/credentials.yaml` must be `0600`; Orbit refuses to start otherwise.
+- Audit records never contain secrets — only identifiers and outcomes.
+- Report vulnerabilities privately via GitHub **Security → Report a vulnerability** rather than
+  a public issue.
+
+## License
+
+No license file has been added yet. Until one is, the code is all-rights-reserved. **Choose a
+license before publishing** — MIT is the simplest option for a tool like this; Apache-2.0 adds
+an explicit patent grant.
+
+## Star History
+
+<a href="https://star-history.com/#Nimatattic/Orbit&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Nimatattic/Orbit&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Nimatattic/Orbit&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Nimatattic/Orbit&type=Date" width="600" />
+  </picture>
+</a>
+
+## Acknowledgements
+
+- [Tencent Cloud SDK for Go](https://github.com/TencentCloud/tencentcloud-sdk-go) — the API surface Orbit drives
+- [Charm](https://charm.sh) — [Bubble Tea](https://github.com/charmbracelet/bubbletea), [Bubbles](https://github.com/charmbracelet/bubbles), [Lip Gloss](https://github.com/charmbracelet/lipgloss)
+- [Cobra](https://github.com/spf13/cobra) — command structure
+- [1Panel](https://1panel.cn) — the certificate workflow that motivated this tool
+
+<div align="center">
+<sub>Built with Go. Ships as one static binary. Never touches a credential it did not store itself.</sub>
+</div>

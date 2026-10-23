@@ -358,7 +358,7 @@ func (m *statusModel) View() string {
 	}
 
 	st := m.currentState()
-	account := panel(m.styles, m.current(), m.renderAccount(st), width, false)
+	account := panel(m.styles, m.current(), truncateLines(m.renderAccount(st), width-2), width, false)
 
 	if st.loading && !st.loaded {
 		body := panel(m.styles, m.bundle.T("status.title"),

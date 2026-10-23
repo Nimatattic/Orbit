@@ -256,7 +256,7 @@ func (m *dashModel) overviewPanel(width int) string {
 	for _, w := range v.Warnings {
 		body += "\n" + m.styles.warn.Render("! "+w)
 	}
-	return panel(m.styles, m.bundle.T("dash.overview"), body, width, false)
+	return panel(m.styles, m.bundle.T("dash.overview"), truncateLines(body, width-2), width, false)
 }
 
 func (m *dashModel) menuPanel(width int) string {

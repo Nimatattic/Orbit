@@ -256,6 +256,16 @@ func (a *App) accountTargets() ([]string, error) {
 func (a *App) knownAliases() []string {
 	seen := map[string]bool{}
 	var out []string
+	// Defensive: `about` promises to work on a machine with no configuration at
+	// all, which means this helper may be reached before a config is loaded.
+	if a.Loaded == nil {
+		if creds, err := a.creds(); err == nil {
+			for alias := range creds.Accounts {
+				out = append(out, alias)
+			}
+		}
+		return out
+	}
 	for _, acc := range a.Loaded.Config.Accounts(DefaultPlatform) {
 		if !seen[acc.Alias] {
 			seen[acc.Alias] = true
@@ -586,6 +596,7 @@ func (a *App) newRootCmd() *cobra.Command {
 		a.newConfigCmd(),
 		a.newDoctorCmd(),
 		a.newVersionCmd(),
+		a.newAboutCmd(),
 	)
 	return root
 }

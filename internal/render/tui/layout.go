@@ -185,6 +185,20 @@ func pad(s string, width int) string {
 	return s + strings.Repeat(" ", width-w)
 }
 
+// truncateLines keeps every line of a block on a single row, cutting it with an
+// ellipsis. Panels render multi-line bodies; letting lipgloss wrap them breaks
+// column alignment, which is worse than losing the tail of a long value.
+func truncateLines(body string, width int) string {
+	if width <= 0 {
+		return body
+	}
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		lines[i] = truncate(line, width)
+	}
+	return strings.Join(lines, "\n")
+}
+
 // wrapLine soft-wraps one line to width display columns, breaking on spaces and
 // falling back to a hard break for long tokens such as action names.
 func wrapLine(s string, width int) []string {
