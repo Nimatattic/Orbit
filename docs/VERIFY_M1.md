@@ -49,8 +49,8 @@
 ## 1. 构建
 
 ```bash
-cd /path/to/orbit
-source ../.toolchains/env.sh
+cd /path/to/orbit          # 你的仓库根目录
+source ../.toolchains/env.sh  # 若使用工作区自带工具链
 make build          # -> bin/orbit
 ./bin/orbit version
 ```
@@ -256,7 +256,7 @@ M1 里最容易出错的一点：EdgeOne 域名的证书配置由 `Certificate.M
 在终端里直接跑 `orbit update --ssl`（或 `orbit clean --ssl`）会进入全屏交互界面：
 
 ```
-Orbit · 应用证书 · main                                          12s
+Orbit · 应用证书 · main                                       12s
 产品：cdn, teo
 
 执行中：已生效 3，未确认 0，失败 1，处理中 3
@@ -333,10 +333,10 @@ Orbit · 状态总览
   产品：cdn, teo        更新于 22:41:55
 
   待处理（7）
-    CDN    cx-checkin.apps.example.com   at8eACUd
-    TEO    hadoop.1.lab.frp....             arulzk3q
+    CDN    cx-checkin.apps.example.com             at8eACUd
+    TEO    hadoop.1.lab.frp.example.com            arulzk3q
   可清理（3）
-    1panel-test-2025                        c-1005
+    1panel-test-2025                               c-1005
   扫描告警（1）
     teo — UnauthorizedOperation
 
