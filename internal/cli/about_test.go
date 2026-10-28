@@ -44,16 +44,24 @@ func TestAboutLogoMatchesBanner(t *testing.T) {
 	}
 	svg := string(raw)
 
-	group := regexp.MustCompile(`(?s)<g id="wordmark"[^>]*>(.*?)</g>`).FindStringSubmatch(svg)
+	group := regexp.MustCompile(`(?s)<g id="wordmark"([^>]*)>(.*?)</g>`).FindStringSubmatch(svg)
 	if group == nil {
 		t.Fatal("banner.svg must contain <g id=\"wordmark\">")
 	}
-	rects := regexp.MustCompile(`<rect x="(\d+)" y="(\d+)"`).FindAllStringSubmatch(group[1], -1)
+	// The poster declares its own grid metrics, so the artwork can be re-scaled
+	// without touching this test; only the bitmap has to stay in sync.
+	advanceMatch := regexp.MustCompile(`data-advance="(\d+)"`).FindStringSubmatch(group[1])
+	if advanceMatch == nil {
+		t.Fatal("the wordmark group must declare data-advance")
+	}
+	advance, err := strconv.Atoi(advanceMatch[1])
+	if err != nil || advance <= 0 {
+		t.Fatalf("invalid data-advance: %q", advanceMatch[1])
+	}
+	rects := regexp.MustCompile(`<rect x="(\d+)" y="(\d+)"`).FindAllStringSubmatch(group[2], -1)
 	if len(rects) == 0 {
 		t.Fatal("the wordmark group must contain pixel rects")
 	}
-
-	const advance = 29
 	minX, minY := 1<<30, 1<<30
 	for _, m := range rects {
 		x, _ := strconv.Atoi(m[1])
