@@ -1,21 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" width="1200" height="360" role="img" aria-label="Orbit — a pixel wordmark in a terminal window">
   <title>Orbit — cloud certificate orchestration</title>
 
-  <rect width="1200" height="360" fill="#171614"/>
+  <rect width="1200" height="360" fill="#0B0E13"/>
 
   <!-- terminal window -->
-  <rect x="60" y="24" width="1080" height="312" rx="12" fill="#201F1D" stroke="#332F2A" stroke-width="1"/>
-  <line x1="61" y1="62" x2="1139" y2="62" stroke="#2C2A26" stroke-width="1"/>
+  <rect x="60" y="24" width="1080" height="312" rx="12" fill="#12161E" stroke="#4A4A4A" stroke-width="1"/>
+  <line x1="61" y1="62" x2="1139" y2="62" stroke="#232A36" stroke-width="1"/>
 
-  <g fill="#4A463F">
+  <g fill="#3E4A5A">
     <circle cx="82" cy="43" r="4"/>
     <circle cx="100" cy="43" r="4"/>
     <circle cx="118" cy="43" r="4"/>
   </g>
-  <text x="1118" y="48" text-anchor="end" fill="#8A857C" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" letter-spacing="1">~/orbit</text>
+  <text x="1118" y="48" text-anchor="end" fill="#8A8A8A" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" letter-spacing="1">~/orbit</text>
 
   <!-- wordmark: one ink colour, square pixels -->
-  <g id="wordmark" data-pixel="20" data-advance="24" fill="#EDE6D8">
+  <g id="wordmark" data-pixel="20" data-advance="24" fill="#E8ECF2">
     <rect x="278" y="92" width="20" height="20"/>
     <rect x="302" y="92" width="20" height="20"/>
     <rect x="326" y="92" width="20" height="20"/>
@@ -99,11 +99,11 @@
   </g>
 
   <!-- shell prompt + block cursor -->
-  <text x="254" y="296" fill="#D97757" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">$</text>
-  <text x="275" y="296" fill="#EDE6D8" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">orbit about</text>
-  <rect x="412" y="282" width="10" height="18" fill="#D97757"/>
+  <text x="254" y="296" fill="#5FAFFF" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">$</text>
+  <text x="275" y="296" fill="#E8ECF2" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">orbit about</text>
+  <rect x="412" y="282" width="10" height="18" fill="#5FAFFF"/>
 
   <!-- status line: spinner glyph in the accent, the rest dim -->
-  <text x="254" y="326" fill="#D97757" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">✻</text>
-  <text x="275" y="326" fill="#8A857C" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">cloud certificate orchestration</text>
+  <text x="254" y="326" fill="#5FAFFF" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">✻</text>
+  <text x="275" y="326" fill="#8A8A8A" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">cloud certificate orchestration</text>
 </svg>

@@ -6,10 +6,12 @@ The glyph rows below are the same 5x7 bitmap drawn by `orbit about`
 re-renders the SVG back into a bitmap and fails if the two ever diverge, so this
 script and the Go slice must be edited together.
 
-Style: pixel + terminal. A warm charcoal terminal window, a monochrome bitmap
-wordmark, one prompt line and one status line in monospace. A single warm accent
-marks the shell prompt, the spinner glyph and the cursor — nothing else is
-coloured. Flat fills only: no gradients, no shadows, no rounded pixels.
+Style: pixel + terminal. A cool charcoal terminal window, a monochrome bitmap
+wordmark, one prompt line and one status line in monospace. The colour palette is
+the TUI's own dark theme, so the poster and the screenshots read as one product: a
+single blue accent marks the shell prompt, the spinner glyph and the cursor, and
+nothing else is coloured. Flat fills only: no gradients, no shadows, no rounded
+pixels.
 
     python3 scripts/gen-banner.py          # rewrite assets/banner.svg
 """
@@ -31,14 +33,16 @@ WIN_X, WIN_Y = 60, 24
 WIN_W, WIN_H = 1080, 312
 TITLE_H = 38
 
-PAGE = "#171614"   # page behind the window (warm, one step darker)
-BG = "#201F1D"     # terminal body
-EDGE = "#332F2A"   # window frame
-RULE = "#2C2A26"   # title-bar separator
-DOT = "#4A463F"    # window dots
-INK = "#EDE6D8"    # the bitmap, warm off-white
-DIM = "#8A857C"    # secondary text
-ACCENT = "#D97757" # Claude-ish terracotta, used sparingly
+# Palette mirrors the TUI's dark theme (internal/render/tui/layout.go):
+# accent #5FAFFF, ok #5FD75F, warn #FFC857, dim #8A8A8A, border #4A4A4A.
+PAGE = "#0B0E13"   # page behind the window, one step darker than the body
+BG = "#12161E"     # terminal body
+EDGE = "#4A4A4A"   # window frame — the TUI's panel border colour
+RULE = "#232A36"   # title-bar separator
+DOT = "#3E4A5A"    # window dots
+INK = "#E8ECF2"    # the bitmap, cool off-white
+DIM = "#8A8A8A"    # secondary text — the TUI's dim
+ACCENT = "#5FAFFF" # the TUI's accent, used for the prompt, spinner and cursor
 
 # --- pixel grid ----------------------------------------------------------------
 PIXEL, GAP = 20, 4
