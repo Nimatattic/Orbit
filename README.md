@@ -1,16 +1,6 @@
 <div align="center">
 
-```text
- ###  ####  ####  ##### #####
-#   # #   # #   #   #     #
-#   # #   # #   #   #     #
-#   # ####  ####    #     #
-#   # # #   #   #   #     #
-#   # #  #  #   #   #     #
- ###  #   # ####  #####   #
-
-      cloud certificate orchestration
-```
+<img src="assets/banner.svg" alt="Orbit — cloud certificate orchestration" />
 
 **Match certificates to your domains, apply them, and retire the leftovers — from the terminal.**
 
@@ -392,6 +382,15 @@ without a terminal.
 | `internal/cli` | Flags, mode selection, output formats, backups, audit |
 | `internal/config`, `internal/credential`, `internal/i18n` | Merge precedence, secret storage, catalogue parity |
 
+The README poster is generated from the same bitmap the CLI draws:
+
+```bash
+python3 scripts/gen-banner.py     # rewrites assets/banner.svg
+```
+
+`TestAboutLogoMatchesBanner` renders the SVG back into a bitmap and fails if it ever
+disagrees with `orbit about`, so editing one without the other cannot slip through.
+
 Working on the UI? `--demo` gives you a complete fake account with certificates, domains,
 pending changes and cleanup candidates:
 
@@ -419,6 +418,7 @@ internal/
   i18n/                    bundle + locale negotiation (en-US, zh-CN)
   exitcode/                exit-code contract and error wrapping
   tty/  version/           terminal detection, build metadata
+assets/                    banner poster (SVG, pixel wordmark)
 locales/                   embedded message catalogues (key parity enforced by test)
 docs/                      design, operations, API notes, verification guides, CAM policies
 scripts/                   cron / systemd examples

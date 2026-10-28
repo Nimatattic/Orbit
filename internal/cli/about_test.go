@@ -3,6 +3,8 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -32,25 +34,66 @@ func TestAboutDrawsLogoAndFacts(t *testing.T) {
 	}
 }
 
-// TestAboutLogoMatchesREADME keeps the two copies of the artwork identical: the
-// tagline in the README and the glyph drawn by `orbit about` must not drift.
-func TestAboutLogoMatchesREADME(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+// TestAboutLogoMatchesBanner keeps the drawn wordmark and the pixel-art poster in
+// sync: both encode the same 5x7 bitmap, so a change in either copy is a change of
+// the brand mark. scripts/gen-banner.py regenerates the asset.
+func TestAboutLogoMatchesBanner(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "assets", "banner.svg"))
 	if err != nil {
-		t.Fatalf("README should exist: %v", err)
+		t.Fatalf("banner asset should exist: %v", err)
 	}
-	present := map[string]bool{}
-	for _, line := range strings.Split(string(raw), "\n") {
-		present[strings.TrimSpace(line)] = true
+	svg := string(raw)
+
+	group := regexp.MustCompile(`(?s)<g id="wordmark"[^>]*>(.*?)</g>`).FindStringSubmatch(svg)
+	if group == nil {
+		t.Fatal("banner.svg must contain <g id=\"wordmark\">")
 	}
-	for _, line := range logoArt {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
+	rects := regexp.MustCompile(`<rect x="(\d+)" y="(\d+)"`).FindAllStringSubmatch(group[1], -1)
+	if len(rects) == 0 {
+		t.Fatal("the wordmark group must contain pixel rects")
+	}
+
+	const advance = 29
+	minX, minY := 1<<30, 1<<30
+	for _, m := range rects {
+		x, _ := strconv.Atoi(m[1])
+		y, _ := strconv.Atoi(m[2])
+		if x < minX {
+			minX = x
 		}
-		if !present[trimmed] {
-			t.Fatalf("logoArt line %q is missing from README.md", trimmed)
+		if y < minY {
+			minY = y
 		}
+	}
+
+	filled := map[[2]int]bool{}
+	for _, m := range rects {
+		x, _ := strconv.Atoi(m[1])
+		y, _ := strconv.Atoi(m[2])
+		filled[[2]int{(y - minY) / advance, (x - minX) / advance}] = true
+	}
+
+	for row, line := range logoArt {
+		var built strings.Builder
+		for col := 0; col < len(line); col++ {
+			if filled[[2]int{row, col}] {
+				built.WriteByte('#')
+			} else {
+				built.WriteByte(' ')
+			}
+		}
+		if strings.TrimRight(built.String(), " ") != strings.TrimRight(line, " ") {
+			t.Fatalf("banner row %d does not match the CLI logo:\n banner %q\n cli    %q",
+				row, built.String(), line)
+		}
+	}
+
+	readme, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(readme), "assets/banner.svg") {
+		t.Fatal("README.md should embed assets/banner.svg")
 	}
 }
 
