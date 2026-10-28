@@ -1,19 +1,13 @@
 <div align="center">
 
 ```text
-         .-~~~~~~~-.
-      .-~           ~-.
-     /                 \
-    |         o         |
-     \                 /
-      ~-.           .-~
-         `-~~~~~~~-'
-
-  ___  ____  ____  ___ _____
- / _ \|  _ \| __ )|_ _|_   _|
-| | | | |_) |  _ \ | |  | |
-| |_| |  _ <| |_) || |  | |
- \___/|_| \_\____/|___|  |_|
+ ###  ####  ####  ##### #####
+#   # #   # #   #   #     #
+#   # #   # #   #   #     #
+#   # ####  ####    #     #
+#   # # #   #   #   #     #
+#   # #  #  #   #   #     #
+ ###  #   # ####  #####   #
 
       cloud certificate orchestration
 ```
@@ -148,19 +142,18 @@ orbit about                         # build, paths, credential and audit status
 `orbit about` is the fastfetch-style identity card:
 
 ```text
-         .-~~~~~~~-.           Orbit v0.1.0
-      .-~           ~-.        a1b2c3d · 2026-10-18T04:00:00Z
-     /                 \       ──────────────────────────────────────────
-    |         o         |      platform     Tencent Cloud
-     \                 /       accounts     2 (main, backup)
-      ~-.           .-~        products     ssl, cdn, teo
-         `-~~~~~~~-'           locale       en-US
+ ###  ####  ####  ##### #####  Orbit v0.1.0
+#   # #   # #   #   #     #    a1b2c3d · 2026-10-18T04:00:00Z
+#   # #   # #   #   #     #    ──────────────────────────────────────────
+#   # ####  ####    #     #    platform     Tencent Cloud
+#   # # #   #   #   #     #    accounts     2 (main, backup)
+#   # #  #  #   #   #     #    products     ssl, cdn, teo
+ ###  #   # ####  #####   #    locale       en-US
                                data         ~/.orbit
-  ___  ____  ____  ___ _____   config       ~/.orbit/config.yaml
- / _ \|  _ \| __ )|_ _|_   _|  credentials  ~/.orbit/credentials.yaml  0600
-| | | | |_) |  _ \ | |  | |    audit        ~/.orbit/audit/audit.jsonl  12 runs
-| |_| |  _ <| |_) || |  | |    runtime      go1.27.1 linux/amd64
- \___/|_| \_\____/|___|  |_|
+                               config       ~/.orbit/config.yaml
+                               credentials  ~/.orbit/credentials.yaml  0600
+                               audit        ~/.orbit/audit/audit.jsonl  12 runs
+                               runtime      go1.27.1 linux/amd64
 ```
 
 ## Usage Guide

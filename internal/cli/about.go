@@ -9,33 +9,26 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/Crequency/orbit/internal/config"
 	"github.com/Crequency/orbit/internal/tty"
 	"github.com/Crequency/orbit/internal/version"
 )
 
-// logoMark is the orbital glyph and logoWord the wordmark. Both are drawn by
-// `orbit about` and shown in the README; TestAboutLogoMatchesREADME keeps the two
-// copies identical.
-var (
-	logoMark = []string{
-		"     .-~~~~~~~-.     ",
-		"  .-~           ~-.  ",
-		" /                 \\ ",
-		"|         o         |",
-		" \\                 / ",
-		"  ~-.           .-~  ",
-		"     `-~~~~~~~-'     ",
-	}
-	logoWord = []string{
-		"  ___  ____  ____  ___ _____ ",
-		" / _ \\|  _ \\| __ )|_ _|_   _|",
-		"| | | | |_) |  _ \\ | |  | |  ",
-		"| |_| |  _ <| |_) || |  | |  ",
-		" \\___/|_| \\_\\____/|___|  |_| ",
-	}
-)
+// logoArt is the wordmark drawn by `orbit about` and shown in the README. It is
+// a 5x7 dot-matrix rendering in pure ASCII, so it survives any terminal font
+// (block characters develop seams with line spacing) and any locale.
+// TestAboutLogoMatchesREADME keeps the two copies identical.
+var logoArt = []string{
+	" ###  ####  ####  ##### #####",
+	"#   # #   # #   #   #     #  ",
+	"#   # #   # #   #   #     #  ",
+	"#   # ####  ####    #     #  ",
+	"#   # # #   #   #   #     #  ",
+	"#   # #  #  #   #   #     #  ",
+	" ###  #   # ####  #####   #  ",
+}
 
 // ANSI codes, applied only on a colour-capable terminal.
 const (
@@ -85,14 +78,10 @@ func (a *App) runAbout() error {
 		}
 	}
 
-	// Left column: the glyph, then the wordmark, both centred in one width.
+	// Left column: the wordmark, centred in its own width.
 	const column = 29
-	left := make([]string, 0, len(logoMark)+len(logoWord)+2)
-	left = append(left, logoMark...)
-	left = append(left, "")
-	left = append(left, logoWord...)
-	centred := make([]string, 0, len(left))
-	for _, line := range left {
+	centred := make([]string, 0, len(logoArt))
+	for _, line := range logoArt {
 		pad := (column - len([]rune(line))) / 2
 		if pad < 0 {
 			pad = 0
@@ -100,14 +89,17 @@ func (a *App) runAbout() error {
 		centred = append(centred, strings.Repeat(" ", pad)+line)
 	}
 
-	// Right column: title, version, rule, then the labelled facts.
+	// Right column: title, version, rule, then the labelled facts. Values are
+	// truncated to the terminal so a long path cannot wrap the card.
+	valueWidth := a.aboutValueWidth(column + 2 + labelWidth + 2)
 	right := []string{title, subtitle, paint(strings.Repeat("─", 42), ansiDim)}
 	for _, r := range rows {
 		pad := labelWidth - lipgloss.Width(r.label)
 		if pad < 0 {
 			pad = 0
 		}
-		right = append(right, paint(r.label+strings.Repeat(" ", pad), ansiDim)+"  "+r.value)
+		value := truncateText(r.value, valueWidth)
+		right = append(right, paint(r.label+strings.Repeat(" ", pad), ansiDim)+"  "+value)
 	}
 
 	height := len(centred)
@@ -209,6 +201,44 @@ func (a *App) auditSummary() string {
 		}
 	}
 	return shortenHome(path) + "  " + a.Bundle.T("about.runs", "count", runs)
+}
+
+// aboutValueWidth is how much room the value column gets, leaving everything
+// left of it untouched. A non-terminal falls back to a conventional 80 columns.
+func (a *App) aboutValueWidth(prefix int) int {
+	width := 80
+	if tty.IsTerminal(os.Stdout) {
+		if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+			width = w
+		}
+	}
+	if avail := width - prefix; avail > 12 {
+		return avail
+	}
+	return 12
+}
+
+// truncateText cuts s to at most width display columns, adding an ellipsis when
+// something was removed. Values here are mostly ASCII paths, but the helper is
+// width-aware so a CJK login name cannot break the card.
+func truncateText(s string, width int) string {
+	if width <= 0 || lipgloss.Width(s) <= width {
+		return s
+	}
+	if width == 1 {
+		return "…"
+	}
+	var b strings.Builder
+	used := 0
+	for _, r := range s {
+		rw := lipgloss.Width(string(r))
+		if used+rw > width-1 {
+			break
+		}
+		b.WriteRune(r)
+		used += rw
+	}
+	return b.String() + "…"
 }
 
 // shortenHome replaces the user's home directory with ~ for readable paths.

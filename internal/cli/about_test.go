@@ -16,11 +16,9 @@ func TestAboutDrawsLogoAndFacts(t *testing.T) {
 	}
 	out := app.testOut.String()
 
-	for _, art := range [][]string{logoMark, logoWord} {
-		for _, line := range art {
-			if want := strings.TrimSpace(line); want != "" && !strings.Contains(out, want) {
-				t.Fatalf("about output is missing artwork line %q:\n%s", want, out)
-			}
+	for _, line := range logoArt {
+		if want := strings.TrimSpace(line); want != "" && !strings.Contains(out, want) {
+			t.Fatalf("about output is missing artwork line %q:\n%s", want, out)
 		}
 	}
 	// Values that do not depend on the resolved language.
@@ -45,15 +43,13 @@ func TestAboutLogoMatchesREADME(t *testing.T) {
 	for _, line := range strings.Split(string(raw), "\n") {
 		present[strings.TrimSpace(line)] = true
 	}
-	for name, art := range map[string][]string{"logoMark": logoMark, "logoWord": logoWord} {
-		for _, line := range art {
-			trimmed := strings.TrimSpace(line)
-			if trimmed == "" {
-				continue
-			}
-			if !present[trimmed] {
-				t.Fatalf("%s line %q is missing from README.md", name, trimmed)
-			}
+	for _, line := range logoArt {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if !present[trimmed] {
+			t.Fatalf("logoArt line %q is missing from README.md", trimmed)
 		}
 	}
 }
