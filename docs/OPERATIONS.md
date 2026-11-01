@@ -40,7 +40,7 @@ cd ~/path/to/orbit
 source ../.toolchains/env.sh
 make dist                                    # = bash scripts/build-dist.sh --all
 ls dist/                                     # 9 个包 + orbit_<version>_checksums.txt
-VERSION="$(git describe --tags --dirty 2>/dev/null || echo v0.0.0-dev)"
+VERSION="$(git describe --tags --dirty 2>/dev/null || echo v0.1.0-dev)"
 cd dist && sha256sum -c "orbit_${VERSION}_checksums.txt"   # 期望 9 行 OK
 ```
 
@@ -63,8 +63,8 @@ ssh root@server "tar -xzf /tmp/orbit_${VERSION}_linux_amd64.tar.gz -C /usr/local
 go install github.com/Nimatattic/Orbit/cmd/orbit@latest
 ```
 
-> 版本号来自构建时的 `git describe --tags`；**工作树没有 tag 时兜底 `v0.0.0-dev`**，
-> 产物名相应变成 `orbit_v0.0.0-dev_linux_amd64.tar.gz`（见 [§9](#9-升级与回滚版本)）。
+> 版本号来自构建时的 `git describe --tags`；**工作树没有 tag 时兜底 `v0.1.0-dev`**，
+> 产物名相应变成 `orbit_v0.1.0-dev_linux_amd64.tar.gz`（见 [§9](#9-升级与回滚版本)）。
 
 ## 2. 目录布局（全部在 `~/.orbit/` 下）
 
@@ -285,10 +285,10 @@ ssh root@server 'mv /usr/local/bin/orbit.bak /usr/local/bin/orbit && orbit versi
 `orbit version` 输出形如 `v1.2.3 (abc1234, 2026-11-01T00:00:00Z)`；审计日志每条都带版本号，
 便于对照"某次变更是哪个版本做的"。
 
-版本来自 `git describe --tags`（构建时注入）。**工作树没有 tag 时兜底为 `v0.0.0-dev`**，
+版本来自 `git describe --tags`（构建时注入）。**工作树没有 tag 时兜底为 `v0.1.0-dev`**，
 不会拿 commit hash 冒充版本号——commit 与构建时间另有字段：
-`./bin/orbit version` 会打印 `v0.0.0-dev (abc1234, 2026-11-01T00:00:00Z)`。
-发布二进制请从打了 tag 的提交构建，否则版本号就是 `v0.0.0-dev`。
+`./bin/orbit version` 会打印 `v0.1.0-dev (abc1234, 2026-11-01T00:00:00Z)`。
+发布二进制请从打了 tag 的提交构建，否则版本号就是 `v0.1.0-dev`。
 
 ## 10. 排错速查
 
@@ -363,7 +363,7 @@ git push origin v1.2.3
 ### 11.3 产物命名与包内结构
 
 命名规则：`dist/orbit_<version>_<goos>_<goarch>[v<goarm>].tar.gz`，Windows 用 `.zip`。
-`<version>` 就是构建时的版本串（tag 上是 tag 名；无 tag 时是 `v0.0.0-dev`）。
+`<version>` 就是构建时的版本串（tag 上是 tag 名；无 tag 时是 `v0.1.0-dev`）。
 
 | 目标 | 产物名 |
 | --- | --- |
@@ -403,7 +403,7 @@ VERSION=v9.9.9 bash scripts/build-dist.sh --all
 - `make dist` 与 `bash scripts/build-dist.sh --all` 完全等价；`make release` 是 `make dist` 的
   **兼容别名**（历史名字，产物一模一样）。
 - 用 `VERSION=...` 覆盖版本时，包名与校验和文件名都跟着变；不覆盖则取 `git describe --tags --dirty`，
-  没有 tag 时兜底 `v0.0.0-dev`。
+  没有 tag 时兜底 `v0.1.0-dev`。
 - 打单个目标：`bash scripts/build-dist.sh linux arm64`；只重算校验和：`bash scripts/build-dist.sh --checksums`。
 - **Windows 包需要 `zip` 命令**；缺了脚本会直接报错退出（`apt-get install zip` / `brew install zip`）。
 
@@ -411,7 +411,7 @@ VERSION=v9.9.9 bash scripts/build-dist.sh --all
 
 ```bash
 bash scripts/build-dist.sh --all
-VERSION="$(git describe --tags --dirty 2>/dev/null || echo v0.0.0-dev)"   # 与脚本同一条命令
+VERSION="$(git describe --tags --dirty 2>/dev/null || echo v0.1.0-dev)"   # 与脚本同一条命令
 cd dist && sha256sum -c "orbit_${VERSION}_checksums.txt"
 # 期望：9 行 "<包名>: OK"
 ```
@@ -424,7 +424,7 @@ cd dist && sha256sum -c "orbit_${VERSION}_checksums.txt"
 cd dist && sha256sum -c --ignore-missing "orbit_${VERSION}_checksums.txt"
 ```
 
-`<version>` 就是 `VERSION` 的值（`v1.2.3` / `v0.0.0-dev` / `v9.9.9` …）。
+`<version>` 就是 `VERSION` 的值（`v1.2.3` / `v0.1.0-dev` / `v9.9.9` …）。
 校验和文件只覆盖**当前版本号**的包，`dist/` 里其它版本的残留文件不参与。
 
 > GitHub 把每个包放进一个 zip 再打包，所以校验和必须对**解压后**的内容算——
@@ -441,7 +441,7 @@ bash scripts/build-dist.sh --all      # 与 CI 的 9 个矩阵分片等价
 
 推到 `main` / 开 PR / 在 Actions 页手动 `workflow_dispatch` 时，CI 会把 9 个目标全编一遍，
 产物以 `orbit-<name>` 命名的 artifact 上传（`orbit-linux-amd64`、`orbit-linux-armv7`、`orbit-darwin-arm64` …），
-**保留 7 天，且不会发布任何 Release**。分支上的构建版本号固定是 `v0.0.0-dev`——
+**保留 7 天，且不会发布任何 Release**。分支上的构建版本号固定是 `v0.1.0-dev`——
 只有 tag 触发的 run 才把 tag 名写进二进制，这是刻意的，避免把开发构建误标成某个版本。
 
 ### 11.7 失败排查
@@ -456,7 +456,7 @@ bash scripts/build-dist.sh --all      # 与 CI 的 9 个矩阵分片等价
 | `'<tag>' is not a v-semver release tag` | tag 名不匹配第一道守卫的正则；确认写法是 `v1.2.3` 形式（不要 `v1.2`、`release-1.2.3`） |
 | `git describe --tags --exact-match returned ...` | checkout 没拿到 tag（`fetch-depth: 0` 已配）或 tag 指向了别的提交；重新 checkout 并确认 tag 落在该提交上 |
 | `sha256sum -c` 报 `FAILED` | 下载被改写/截断，删掉重下；本地则重新 `--all` 打包 |
-| 版本号变成 `v0.0.0-dev` | 当前提交没有 tag（`git describe` 取不到）；发版构建必须在 tag 的提交上 |
+| 版本号变成 `v0.1.0-dev` | 当前提交没有 tag（`git describe` 取不到）；发版构建必须在 tag 的提交上 |
 
 > 排发布失败时，**顺序**是：先看 `test`（格式化/tidy/vet/测试）→ 再看 `build` 的 9 个分片 →
 > 最后才是 `release` 的守卫与校验和。守卫失败不会留下半成品 Release。
@@ -474,7 +474,7 @@ bash scripts/build-dist.sh --all      # 与 CI 的 9 个矩阵分片等价
    本地与 CI 不会各自漂移。构建时间会写进二进制，因此不同次构建的哈希本就不同。
 
 **tag 与 GPG 签名由维护者手工完成**，CI 不签名；release job 只发布已存在的 tag 产物。
-没有 tag 的本地构建版本号兜底 `v0.0.0-dev`（见 [§9](#9-升级与回滚版本)）。
+没有 tag 的本地构建版本号兜底 `v0.1.0-dev`（见 [§9](#9-升级与回滚版本)）。
 
 ## 12. License
 

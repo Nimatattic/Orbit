@@ -97,8 +97,8 @@ jobs:
 
       - name: Build and package
         env:
-          # A tag run stamps the tag; everything else deliberately says v0.0.0-dev.
-          VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'v0.0.0-dev' }}
+          # A tag run stamps the tag; everything else deliberately says v0.1.0-dev.
+          VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'v0.1.0-dev' }}
         run: bash scripts/build-dist.sh "${{ matrix.goos }}" "${{ matrix.goarch }}" "${{ matrix.goarm }}"
 
       - name: Upload artifacts

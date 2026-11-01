@@ -8,7 +8,7 @@
 #
 # Environment overrides:
 #   VERSION    version to stamp and to name the packages with
-#              (default: git describe --tags --dirty, then v0.0.0-dev)
+#              (default: git describe --tags --dirty, then v0.1.0-dev)
 #   DIST_DIR   output directory (default: <repo>/dist)
 #   ZIP_BIN    zip binary used for Windows packages (default: zip)
 #
@@ -51,7 +51,7 @@ resolve_version() {
     v="$(git -C "$REPO_ROOT" describe --tags --dirty 2>/dev/null || true)"
   fi
   if [ -z "$v" ]; then
-    v="v0.0.0-dev"
+    v="v0.1.0-dev"
   fi
   # VERSION is user input; keep it safe for a file name.
   printf '%s' "$(printf '%s' "$v" | tr '/ ' '--')"

@@ -95,7 +95,7 @@ containing a flat `orbit` + `LICENSE` + `README.md`, plus one checksum file:
 | freebsd / amd64 | `orbit_<version>_freebsd_amd64.tar.gz` |
 | checksums | `orbit_<version>_checksums.txt` (sha256, 9 lines) |
 
-`<version>` is the release tag (a build without a tag is named `v0.0.0-dev`).
+`<version>` is the release tag (a build without a tag is named `v0.1.0-dev`).
 
 Download, verify, install — `<version>` and the platform pair are the only things to change:
 

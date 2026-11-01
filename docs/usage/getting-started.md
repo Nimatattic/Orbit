@@ -21,7 +21,7 @@ packages** plus one checksum file; the name is always
 | freebsd / amd64 | `orbit_<version>_freebsd_amd64.tar.gz` |
 | checksums | `orbit_<version>_checksums.txt` (sha256, 9 lines) |
 
-`<version>` is the release tag; a build made without a tag is named `v0.0.0-dev`.
+`<version>` is the release tag; a build made without a tag is named `v0.1.0-dev`.
 
 ### Download and verify
 
@@ -56,14 +56,14 @@ make install          # -> /usr/local/bin/orbit
 ```bash
 source ../.toolchains/env.sh        # if you use the workspace-managed toolchain
 make dist                           # = bash scripts/build-dist.sh --all
-VERSION="$(git describe --tags --dirty 2>/dev/null || echo v0.0.0-dev)"
+VERSION="$(git describe --tags --dirty 2>/dev/null || echo v0.1.0-dev)"
 cd dist && sha256sum -c "orbit_${VERSION}_checksums.txt"   # 9 packages: all OK
 ```
 
 `make release` still works: it is a compatibility alias for `make dist` (same
 `scripts/build-dist.sh`, same 9 artifacts). A build made without a tag on the working tree
-is stamped `v0.0.0-dev`, so the packages are named
-`orbit_v0.0.0-dev_linux_amd64.tar.gz` and so on.
+is stamped `v0.1.0-dev`, so the packages are named
+`orbit_v0.1.0-dev_linux_amd64.tar.gz` and so on.
 
 `go install` works because the module path matches the repository
 (`github.com/Nimatattic/Orbit`, upper case included — Go paths are case-sensitive):

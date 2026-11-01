@@ -5,8 +5,10 @@ package version
 //
 //	-X github.com/Nimatattic/Orbit/internal/version.Version=...
 var (
-	// Version is the semantic version or git describe output.
-	Version = "dev"
+	// Version is the semantic version or git describe output. It tracks the
+	// release tag; the Makefile and scripts/build-dist.sh stamp it at link time so
+	// that a plain "go build" still reports a meaningful version.
+	Version = "v0.1.0"
 	// Commit is the short git commit hash.
 	Commit = "none"
 	// Date is the build timestamp (RFC3339).

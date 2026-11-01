@@ -10,7 +10,7 @@ MODULE  := $(shell sed -n 's/^module[[:space:]]*//p' go.mod 2>/dev/null)
 # Nearest tag, or a neutral placeholder. A commit hash is never reported as a
 # version — the hash already travels in COMMIT. Override with "make VERSION=v1.2.3";
 # release builds run in CI where the tag is present, so they never see the fallback.
-VERSION ?= $(shell git describe --tags --dirty 2>/dev/null || echo v0.0.0-dev)
+VERSION ?= $(shell git describe --tags --dirty 2>/dev/null || echo v0.1.0-dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -X $(MODULE)/internal/version.Version=$(VERSION) \
