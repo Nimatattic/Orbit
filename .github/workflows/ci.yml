@@ -1,22 +1,34 @@
 # Continuous integration for Orbit.
 #
-# Everything here runs offline against fakes: the test suite never reaches the
-# network, so no cloud credentials or repository secrets are required.
+# Branches and pull requests only test and build; a v-semver tag additionally
+# publishes a GitHub Release with every supported platform. The build matrix,
+# packaging and checksums live in scripts/build-dist.sh, so local "make dist" and
+# CI produce identical artifacts.
 name: CI
 
 on:
   push:
     branches: [main]
-    tags: ["v*"]
+    # Wide glob on purpose: GitHub's tag filter patterns are minimatch globs,
+    # not regular expressions ("[0-9]+" would mean "a digit followed by one or
+    # more ']'"), so a strict pattern here can silently never fire. Every tag
+    # starting with "v" triggers the workflow; the release job's regex guard is
+    # what decides whether it is a publishable v-semver tag. Do not move that
+    # validation back into this filter.
+    tags: ['v*']
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
-# Least privilege by default; the release job raises it for itself below.
+# Least privilege by default: the release job is the only writer.
 permissions:
   contents: read
 
-env:
-  GOFLAGS: -mod=mod
+# One run per ref. A tag run is never cancelled: a half-published release is
+# worse than a queued one.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   test:
@@ -24,14 +36,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           # go.mod's "go 1.27.1" directive is the single source of truth.
-          # If that patch release is ever withdrawn from go.dev/dl, replace this
-          # block with "go-version: '1.27.x'" and keep the directive as the floor.
           go-version-file: go.mod
           cache: true
 
@@ -40,87 +50,121 @@ jobs:
           unformatted="$(gofmt -l .)"
           if [ -n "$unformatted" ]; then
             echo "gofmt is required on:"; echo "$unformatted"
-            echo "run 'make fmt' locally to fix"; exit 1
+            exit 1
+          fi
+
+      - name: Verify go.mod is tidy
+        run: |
+          diff="$(go mod tidy -diff)"
+          if [ -n "$diff" ]; then
+            echo "$diff"
+            echo "::error::go mod tidy would rewrite go.mod/go.sum"
+            exit 1
           fi
 
       - name: Vet
         run: go vet ./...
 
       - name: Test
-        run: go test ./...
+        run: go test -count=1 ./...
 
   build:
-    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
+    name: build (${{ matrix.name }})
     needs: test
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        # The same targets "make release" ships.
         include:
-          - { goos: linux, goarch: amd64 }
-          - { goos: linux, goarch: arm64 }
-          - { goos: darwin, goarch: arm64 }
+          - { name: linux-amd64,   goos: linux,   goarch: amd64, goarm: "" }
+          - { name: linux-arm64,   goos: linux,   goarch: arm64, goarm: "" }
+          - { name: linux-armv7,   goos: linux,   goarch: arm,   goarm: "7" }
+          - { name: linux-386,     goos: linux,   goarch: 386,   goarm: "" }
+          - { name: darwin-amd64,  goos: darwin,  goarch: amd64, goarm: "" }
+          - { name: darwin-arm64,  goos: darwin,  goarch: arm64, goarm: "" }
+          - { name: windows-amd64, goos: windows, goarch: amd64, goarm: "" }
+          - { name: windows-arm64, goos: windows, goarch: arm64, goarm: "" }
+          - { name: freebsd-amd64, goos: freebsd, goarch: amd64, goarm: "" }
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
 
-      - name: Build
+      - name: Build and package
         env:
-          CGO_ENABLED: "0"
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-        run: |
-          go build -trimpath ./...
-          go build -trimpath -o /dev/null ./cmd/orbit
+          # A tag run stamps the tag; everything else deliberately says v0.0.0-dev.
+          VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'v0.0.0-dev' }}
+        run: bash scripts/build-dist.sh "${{ matrix.goos }}" "${{ matrix.goarch }}" "${{ matrix.goarm }}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: orbit-${{ matrix.name }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+          if-no-files-found: error
+          retention-days: 7
 
   release:
     name: release
-    # Tags only, and only after the gate above is green.
+    needs: build
+    # Only a v-tag may publish. The guard step is the second line of defence:
+    # GitHub's tag patterns are globs, not a regular expression.
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
-          # make release derives VERSION from "git describe --tags", so the tag
-          # history has to be present.
-          fetch-depth: 0
+          fetch-depth: 0   # git describe --exact-match needs the tag ref
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Verify the tag is what make release will stamp
-        # "make release" derives VERSION from "git describe --tags"; refuse to
-        # publish binaries that would be labelled v0.0.0-dev.
+      - name: Guard the release tag
         run: |
-          described="$(git describe --tags)"
-          if [ "$described" != "${GITHUB_REF_NAME}" ]; then
-            echo "::error::make release would stamp '$described', expected '${GITHUB_REF_NAME}'"
+          tag="$GITHUB_REF_NAME"
+          if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::'$tag' is not a v-semver release tag"
             exit 1
           fi
+          exact="$(git describe --tags --exact-match)"
+          if [ "$exact" != "$tag" ]; then
+            echo "::error::git describe --tags --exact-match returned '$exact', expected '$tag'"
+            exit 1
+          fi
+          echo "release tag verified: $tag"
 
-      - name: Build release binaries
-        run: make release
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
 
-      - name: Publish release assets
+      - name: Regenerate and verify checksums
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          bash scripts/build-dist.sh --checksums
+          count="$(find dist -maxdepth 1 -type f \( -name 'orbit_*.tar.gz' -o -name 'orbit_*.zip' \) | wc -l)"
+          if [ "$count" -ne 9 ]; then
+            echo "::error::expected 9 packages, found $count"
+            exit 1
+          fi
+          ( cd dist && sha256sum -c "orbit_${VERSION}_checksums.txt" )
+
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/orbit-linux-amd64
-            dist/orbit-linux-arm64
-            dist/orbit-darwin-arm64
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*_checksums.txt
           fail_on_unmatched_files: true
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

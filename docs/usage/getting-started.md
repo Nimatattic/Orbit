@@ -4,17 +4,45 @@
 
 ## 1. Install
 
-Static binaries (no runtime dependencies, `CGO_ENABLED=0`):
+Static binaries (no runtime dependencies, `CGO_ENABLED=0`). Each release publishes **9
+packages** plus one checksum file; the name is always
+`orbit_<version>_<goos>_<goarch>[v<goarm>].tar.gz`, with `.zip` on Windows:
+
+| Target | Package |
+| --- | --- |
+| linux / amd64 | `orbit_<version>_linux_amd64.tar.gz` |
+| linux / arm64 | `orbit_<version>_linux_arm64.tar.gz` |
+| linux / armv7 | `orbit_<version>_linux_armv7.tar.gz` |
+| linux / 386 | `orbit_<version>_linux_386.tar.gz` |
+| darwin / amd64 | `orbit_<version>_darwin_amd64.tar.gz` |
+| darwin / arm64 | `orbit_<version>_darwin_arm64.tar.gz` |
+| windows / amd64 | `orbit_<version>_windows_amd64.zip` |
+| windows / arm64 | `orbit_<version>_windows_arm64.zip` |
+| freebsd / amd64 | `orbit_<version>_freebsd_amd64.tar.gz` |
+| checksums | `orbit_<version>_checksums.txt` (sha256, 9 lines) |
+
+`<version>` is the release tag; a build made without a tag is named `v0.0.0-dev`.
+
+### Download and verify
 
 ```bash
-make release
-# dist/orbit-linux-amd64   dist/orbit-linux-arm64   dist/orbit-darwin-arm64
+VERSION=v1.2.3
+base="https://github.com/Nimatattic/Orbit/releases/download/${VERSION}"
 
-scp dist/orbit-linux-amd64 root@server:/usr/local/bin/orbit
-ssh root@server 'chmod 755 /usr/local/bin/orbit && orbit version'
+curl -LO "${base}/orbit_${VERSION}_linux_amd64.tar.gz"   # pick your row from the table
+curl -LO "${base}/orbit_${VERSION}_checksums.txt"
+
+sha256sum -c --ignore-missing "orbit_${VERSION}_checksums.txt"   # -> ...: OK
+tar -xzf "orbit_${VERSION}_linux_amd64.tar.gz"                   # flat: orbit, LICENSE, README.md
+
+install -m 0755 orbit /usr/local/bin/orbit
+orbit version
 ```
 
-From source (Go 1.27+, `make`):
+The archives are flat — `orbit` (`orbit.exe` on Windows), `LICENSE`, `README.md` — so
+`tar -xzf ... -C /usr/local/bin orbit` installs in one step.
+
+### From source (Go 1.27+, `make`)
 
 ```bash
 git clone https://github.com/Nimatattic/Orbit.git
@@ -22,6 +50,20 @@ cd Orbit
 make build            # -> bin/orbit
 make install          # -> /usr/local/bin/orbit
 ```
+
+### Build the release packages
+
+```bash
+source ../.toolchains/env.sh        # if you use the workspace-managed toolchain
+make dist                           # = bash scripts/build-dist.sh --all
+VERSION="$(git describe --tags --dirty 2>/dev/null || echo v0.0.0-dev)"
+cd dist && sha256sum -c "orbit_${VERSION}_checksums.txt"   # 9 packages: all OK
+```
+
+`make release` still works: it is a compatibility alias for `make dist` (same
+`scripts/build-dist.sh`, same 9 artifacts). A build made without a tag on the working tree
+is stamped `v0.0.0-dev`, so the packages are named
+`orbit_v0.0.0-dev_linux_amd64.tar.gz` and so on.
 
 `go install` works because the module path matches the repository
 (`github.com/Nimatattic/Orbit`, upper case included — Go paths are case-sensitive):
@@ -34,8 +76,9 @@ go install github.com/Nimatattic/Orbit/cmd/orbit@main
 ```
 
 The result lands in `$(go env GOPATH)/bin/orbit` (or `$GOBIN`). It is the same
-`CGO_ENABLED=0` static binary `make release` produces, with the version taken from the
-tag Go resolved; `make build` additionally stamps the local commit and date.
+`CGO_ENABLED=0` static binary that `scripts/build-dist.sh` packages (and `make dist`
+drives), with the version taken from the tag Go resolved; `make build` additionally stamps
+the local commit and date.
 
 ## 2. Register an account
 

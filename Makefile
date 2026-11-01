@@ -17,18 +17,23 @@ LDFLAGS := -X $(MODULE)/internal/version.Version=$(VERSION) \
            -X $(MODULE)/internal/version.Commit=$(COMMIT) \
            -X $(MODULE)/internal/version.Date=$(DATE)
 
-.PHONY: all build release test vet fmt fmt-check check tidy lint verify-api install clean
+.PHONY: all build dist release test vet fmt fmt-check check tidy lint verify-api install clean
 
 all: build
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/orbit ./cmd/orbit
 
-# Static binaries for the machines Orbit actually runs on.
-release:
-	CGO_ENABLED=0 GOOS=linux  GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/orbit-linux-amd64  ./cmd/orbit
-	CGO_ENABLED=0 GOOS=linux  GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/orbit-linux-arm64  ./cmd/orbit
-	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/orbit-darwin-arm64 ./cmd/orbit
+# Cross-compiled release packages for every supported platform (9 targets:
+# linux amd64/arm64/armv7/386, darwin amd64/arm64, windows amd64/arm64,
+# freebsd amd64). The matrix, packaging and checksums live in
+# scripts/build-dist.sh so local builds and CI cannot drift.
+# Override the version with "make dist VERSION=v1.2.3".
+dist:
+	@VERSION="$(VERSION)" bash scripts/build-dist.sh --all
+
+# Historical name: "make release" is the same as "make dist".
+release: dist
 
 test:
 	go test ./...

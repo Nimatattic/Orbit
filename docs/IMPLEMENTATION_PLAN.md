@@ -607,15 +607,23 @@ platforms:
 
 ### 7.3 构建与发布
 
+> **本节已过时，见 [OPERATIONS.md](OPERATIONS.md#11-ci-与发布)。** 下面的手写 `go build` 只保留了
+> "开发时怎么快速编一个本机二进制"的历史记录；真正的发布口径（9 个目标、打包、校验和）在
+> [`scripts/build-dist.sh`](../scripts/build-dist.sh)，不要在文档或脚本里再手抄第二条构建路径。
+
 ```bash
 source .toolchains/env.sh
-go build -ldflags "-X github.com/Nimatattic/Orbit/internal/version.Version=$(git describe --tags)" -o bin/orbit ./cmd/orbit
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o orbit-linux-amd64 ./cmd/orbit   # 部署到服务器
-CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -o orbit-darwin-arm64 ./cmd/orbit  # 本机 TUI 使用
+go build -ldflags "-X github.com/Nimatattic/Orbit/internal/version.Version=$(git describe --tags)" -o bin/orbit ./cmd/orbit   # 日常开发用
 ```
 
-- Makefile：`build / test / lint / vet / fmt / e2e-dryrun / verify-api`（后者跑待实测清单）。
-- CI：`go vet` + `golangci-lint` + `go test ./...`（全部用例不触网，靠 `cloud/fake`）。
+- 发布产物（**已过时，以 OPERATIONS §11.3 为准**）：早期设计里是
+  `orbit-linux-amd64` / `orbit-darwin-arm64` 这类裸二进制；现在统一由
+  `bash scripts/build-dist.sh --all`（`make dist` 调它，`make release` 是兼容别名）产出
+  9 个打包产物 `dist/orbit_<version>_<goos>_<goarch>[v7].tar.gz`（Windows 为 `.zip`）
+  与 `dist/orbit_<version>_checksums.txt`。
+- Makefile：`build / dist / release(=dist) / test / lint / vet / fmt / fmt-check / check / tidy / verify-api / install / clean`。
+- CI：`gofmt` 检查 + `go mod tidy -diff` + `go vet` + `go test ./...`（全部用例不触网，靠 `cloud/fake`），
+  再按 9 个目标的矩阵各跑一次 `scripts/build-dist.sh`；`v*` tag 才发 Release。
 
 ---
 
@@ -717,7 +725,7 @@ CLB（`DescribeListeners` + SNI `Rules` + `ModifyDomainAttributes`）、WAF、AP
 | M3 应用执行 | S-CDN（Route 局部更新）+ S-TEO（`Mode=sslcert`）、S-UNI 备用、异步轮询、回读复核、错误码处置、审计、幂等 | `orbit update --ssl --yes` 端到端可用 | 3.5 人日 | ✅ **完成** |
 | M4 清理 | 关联证据、G1–G4、服务角色检查、备份、二次确认、删除任务状态分类 | `orbit clean --ssl` 安全可用 | 2.5 人日 | ✅ **完成**（服务角色确切名称待真机确认，V1） |
 | M5 TUI + i18n + 多账号 | 多 Tab、账号多选、计划预览/确认、进度与结果页、zh-CN/en-US 语言包 | `orbit` / `orbit status` TUI 可用 | 4.5 人日 | ✅ **完成**（总览多 Tab、账号多选、计划确认、执行进度与动态等待、`u`/`c` 直达、`orbit dash` 总控台） |
-| M6 交付 | 打包、cron/systemd 示例、README、`doctor`、CAM 模板、真机验收 | 可上线版本 + 文档 | 2 人日 | ✅ 交付完成（`make release` 三平台静态二进制、[OPERATIONS.md](OPERATIONS.md) 运维手册、`docs/cam/` 三档策略、`scripts/` 示例）；**真机验收待用户执行** |
+| M6 交付 | 打包、cron/systemd 示例、README、`doctor`、CAM 模板、真机验收 | 可上线版本 + 文档 | 2 人日 | ✅ 交付完成（发布打包、[OPERATIONS.md](OPERATIONS.md) 运维手册、`docs/cam/` 三档策略、`scripts/` 示例）；**真机验收待用户执行** |
 | 合计 |  |  | **≈ 19.5 人日** |  |
 
 > **M0 实际交付**（略超出原定范围）：`internal/core` 的匹配选优、计划与清理四道闸门已实现并通过单测，因此 M2 与 M4 的核心逻辑提前完成；M0–M2 的"只读可验"目标已达成，可直接进入 M1 接入真实 SDK。

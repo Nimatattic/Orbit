@@ -79,14 +79,66 @@ run against the real cloud.
 
 ## Installation
 
-```bash
-# static binaries for linux/amd64, linux/arm64, darwin/arm64
-make release
-scp dist/orbit-linux-amd64 root@server:/usr/local/bin/orbit
+Every release ships **9 static packages** (no runtime dependencies, `CGO_ENABLED=0`), each
+containing a flat `orbit` + `LICENSE` + `README.md`, plus one checksum file:
 
-# or build from source (Go 1.27+, make)
-make build && make install
+| Target | Package |
+| --- | --- |
+| linux / amd64 | `orbit_<version>_linux_amd64.tar.gz` |
+| linux / arm64 | `orbit_<version>_linux_arm64.tar.gz` |
+| linux / armv7 | `orbit_<version>_linux_armv7.tar.gz` |
+| linux / 386 | `orbit_<version>_linux_386.tar.gz` |
+| darwin / amd64 | `orbit_<version>_darwin_amd64.tar.gz` |
+| darwin / arm64 | `orbit_<version>_darwin_arm64.tar.gz` |
+| windows / amd64 | `orbit_<version>_windows_amd64.zip` |
+| windows / arm64 | `orbit_<version>_windows_arm64.zip` |
+| freebsd / amd64 | `orbit_<version>_freebsd_amd64.tar.gz` |
+| checksums | `orbit_<version>_checksums.txt` (sha256, 9 lines) |
+
+`<version>` is the release tag (a build without a tag is named `v0.0.0-dev`).
+
+Download, verify, install — `<version>` and the platform pair are the only things to change:
+
+```bash
+VERSION=v1.2.3
+base="https://github.com/Nimatattic/Orbit/releases/download/${VERSION}"
+
+curl -LO "${base}/orbit_${VERSION}_linux_amd64.tar.gz"
+curl -LO "${base}/orbit_${VERSION}_checksums.txt"
+
+sha256sum -c --ignore-missing "orbit_${VERSION}_checksums.txt"   # -> ...: OK
+tar -xzf "orbit_${VERSION}_linux_amd64.tar.gz"                   # flat: orbit, LICENSE, README.md
+
+install -m 0755 orbit /usr/local/bin/orbit
+orbit version
 ```
+
+`--ignore-missing` only checks the packages you actually downloaded; after a local
+`make dist` in a full `dist/` directory, drop it to verify all 9 at once:
+
+```bash
+cd dist && sha256sum -c "orbit_${VERSION}_checksums.txt"
+```
+
+### From source
+
+```bash
+git clone https://github.com/Nimatattic/Orbit.git
+cd Orbit
+make build && make install    # -> bin/orbit, then /usr/local/bin/orbit (Go 1.27+)
+```
+
+### Build the release packages yourself
+
+```bash
+make dist        # = bash scripts/build-dist.sh --all -> 9 packages + checksums in dist/
+make release     # compatibility alias for make dist (same script, same artifacts)
+```
+
+`make dist` and `make release` are exactly equivalent: `release` is the historical name,
+kept so existing scripts keep working. Both delegate to
+[`scripts/build-dist.sh`](scripts/build-dist.sh), the single source of truth that CI also
+calls — so a local build and a published release are produced by the same code.
 
 Full instructions, including `go install`:
 [getting-started.md](docs/usage/getting-started.md#1-install).
@@ -126,7 +178,7 @@ make test                        # full suite, fully offline
 make vet                         # go vet
 make check                       # fmt check + vet + test, exactly what CI runs
 make lint                        # vet + golangci-lint when installed
-make release                     # three static binaries into dist/
+make dist                        # 9 packages + checksums into dist/ (make release is the alias)
 ```
 
 The test suite never touches the network: the cloud is reached through narrow
@@ -174,7 +226,7 @@ assets/                    banner poster (SVG, pixel wordmark)
 docs/usage/                user documentation (installation, commands, TUI, DNS, …)
 docs/                      operations, design, API notes, verification, CAM policies
 locales/                   embedded message catalogues (key parity enforced by test)
-scripts/                   cron / systemd examples, banner generator
+scripts/                   build-dist.sh (release matrix), cron / systemd examples, banner generator
 testdata/                  fixtures
 ```
 
@@ -183,7 +235,7 @@ testdata/                  fixtures
 | Document | What it covers |
 | --- | --- |
 | **[docs/usage/](docs/usage/README.md)** | **All usage: install, commands, TUI, DNS, permissions, config, troubleshooting** |
-| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Deployment: cron/systemd, audit queries, rollback, upgrades |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Deployment: install, cron/systemd, audit queries, rollback, upgrades, CI and release artifacts |
 | [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | Architecture, milestones, interface inventory |
 | [docs/TENCENT_API_NOTES.md](docs/TENCENT_API_NOTES.md) | Verified cloud behaviour and every open question |
 | [docs/VERIFY_M1.md](docs/VERIFY_M1.md) | Step-by-step verification against a real account |
@@ -199,7 +251,7 @@ testdata/                  fixtures
 - [ ] Additional providers (Alibaba Cloud, AWS)
 - [ ] Per-domain certificate pairs (RSA + SM2) instead of a single binding
 - [ ] `orbit restore` — re-upload a certificate straight from `~/.orbit/backups`
-- [x] CI (vet + tests + release binaries)
+- [x] CI (vet + tests + 9-platform release packages)
 - [ ] GPG-signed tags and releases (maintainer, manual)
 
 ## Contributing
