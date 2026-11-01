@@ -14,7 +14,7 @@
 [![Last commit](https://img.shields.io/github/last-commit/Nimatattic/Orbit)](https://github.com/Nimatattic/Orbit/commits/main)
 [![Issues](https://img.shields.io/github/issues/Nimatattic/Orbit)](https://github.com/Nimatattic/Orbit/issues)
 
-[Quick start](#quick-start) · [Installation](#installation) · [Usage](#usage-guide) · [Permissions](#permissions) · [How to dev](#how-to-dev) · [Docs](#documentation)
+[Quick start](#quick-start) · [Install](#installation) · **[Usage docs](docs/usage/README.md)** · [Operations](docs/OPERATIONS.md)
 
 </div>
 
@@ -27,36 +27,36 @@ certificate and something pushes it to the cloud. What is left is the part nobod
 script — **pointing the right certificate at the right domain, and deleting the ones that no
 longer serve anything.**
 
-That is the gap Orbit fills. It reads the certificate pool and the live domain inventory,
-decides per domain which certificate *should* be bound, applies it, verifies that the change
-came back from the cloud, and — separately, behind four gates — removes certificates that no
-cloud resource references any more.
+Orbit fills that gap. It reads the certificate pool and the live domain inventory, decides
+per domain which certificate *should* be bound, applies it, verifies the change came back
+from the cloud, and — separately, behind four gates — removes certificates that no cloud
+resource references any more. It also manages the DNS records those certificates depend on.
 
 ```text
 1Panel / ACME ──▶ local dir ──▶ upload to cloud ──▶ ┌─────────────────────┐
                                                     │ apply to domains    │ ◀── Orbit
                                                     │ delete orphans      │ ◀── Orbit
+                                                    │ manage DNS records  │ ◀── Orbit
                                                     └─────────────────────┘
 ```
 
-Orbit deliberately stops at the dotted line: it does not issue certificates and does not read
-`tccli` credentials. It is the missing step in *your* pipeline, not another CA client.
+Orbit stops at the dotted line: it does not issue certificates and does not read `tccli`
+credentials. It is the missing step in *your* pipeline, not another CA client.
 
 ## Features
 
 | | |
 | --- | --- |
-| **Matching that respects RFC 6125** | Exact SANs, single-label wildcards (`*.example.com` matches `a.example.com`, never `a.b.example.com`), validity-aware ranking, deterministic tie-breaking. |
-| **Idempotent plans** | `update` builds a plan first; domains already holding the best certificate are marked *up to date* and never written twice. |
-| **Product-aware writes** | CDN uses a partial config update (`ModifyDomainConfig` on `Https.CertInfo.CertId`); EdgeOne uses `ModifyHostsCertificate` in `sslcert` mode. Groups run concurrently. |
-| **Read-back verification** | Every write is confirmed by polling the product until the domain reports the new certificate. A timeout is reported as `unverified`, never as a silent success. |
-| **Four gates before deletion** | Uploaded by you · superseded by another certificate · beyond the grace period · referenced by no cloud resource. Deletion is refused unless the evidence is complete. |
-| **Backup before delete** | Certificate, chain and private key (mode `0600`) plus a metadata record, written before the API call. |
-| **Append-only audit log** | One JSONL record per change plus a per-run summary. Never contains credentials. |
-| **Honest semantics** | Dry-run by default, `--yes` required to write, exit codes that distinguish *pending changes* from *partial failure* from *safety refusal*. |
-| **A real TUI** | Status overview, per-account console, permission guide, live apply progress with per-domain state. |
-| **DNS management** | Hosted zones and records: list, create/update (idempotent `set`), delete, enable/disable, plus a propagation check. CLI and TUI. |
-| **Static binary** | `CGO_ENABLED=0`, one file, no runtime dependencies. English and 简体中文 at parity. |
+| **RFC 6125 matching** | Exact SANs, single-label wildcards, validity-aware ranking, deterministic tie-breaking. |
+| **Idempotent plans** | `update` plans first; domains already holding the best certificate are never written twice. |
+| **Product-aware writes** | CDN partial config update, EdgeOne `sslcert` mode; groups run concurrently, results stay ordered. |
+| **Read-back verification** | Every write is confirmed by polling the product. A timeout is `unverified`, never a silent success. |
+| **Gated deletion** | Uploaded by you · superseded · beyond the grace period · referenced by nothing. Evidence must be complete. |
+| **Backup before delete** | Certificate, chain and private key (`0600`) plus metadata, written before the API call. |
+| **Audit log** | Append-only JSONL, one record per change plus a run summary. Never contains credentials. |
+| **DNS management** | Zones and records: list, idempotent `set`, delete, enable/disable, propagation check. CLI and TUI. |
+| **Two interfaces** | Full-screen TUI for humans, exit codes and `--json` for cron. |
+| **One static binary** | `CGO_ENABLED=0`, no runtime dependencies, English and 简体中文 at parity. |
 
 ## Quick start
 
@@ -67,354 +67,54 @@ git clone https://github.com/Nimatattic/Orbit.git
 cd Orbit
 make build
 
-./bin/orbit --demo status                # inventory + plan, read-only
-./bin/orbit --demo update --ssl          # TUI on a terminal, plan-only otherwise
-./bin/orbit --demo update --ssl --dry-run
+./bin/orbit --demo status                 # inventory + plan, read-only
+./bin/orbit --demo update --ssl --dry-run # what would be applied, and why
+./bin/orbit --demo dns ls example.com     # DNS records
+./bin/orbit --demo dash                   # the interactive console
 ```
 
-```text
-╭─ Orbit · status overview ────────────────────────────────────────────────────────────────────╮
-│Multi-cloud certificate orchestration and inspection                                          │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ registered accounts ────────────────────────────────────────────────────────────────────────╮
-│▌1 demo (4)▐                                                                                  │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ demo ───────────────────────────────────────────────────────────────────────────────────────╮
-│certificates 7 (uploaded 6 / in use 4 / unused 2) · resources 4 (unbound 2 · foreign 1)       │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ to apply (4)   ─────────────────────────────────────────────────────────────────────────────╮
-│▸ [ ] CDN    static.example.com                       c-1002                                  │
-│  [ ] CDN    www.example.com                          c-1002                                  │
-│  [ ] TEO    api.example.com                          c-1003                                  │
-│  [ ] TEO    cdn.example.com                          c-1002                                  │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ cleanup candidates (1)   ───────────────────────────────────────────────────────────────────╮
-│  [ ] SSL    1panel-test-example-com-2025             c-1005                                  │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-
-↑/↓ move  ·  space toggle  ·  a all  ·  n none  ·  u apply  ·  c cleanup  ·  s list  ·  q quit
-```
+Then follow **[getting started](docs/usage/getting-started.md)** to register an account and
+run against the real cloud.
 
 ## Installation
 
-### Prebuilt static binaries
-
 ```bash
+# static binaries for linux/amd64, linux/arm64, darwin/arm64
 make release
-# dist/orbit-linux-amd64   dist/orbit-linux-arm64   dist/orbit-darwin-arm64
-
 scp dist/orbit-linux-amd64 root@server:/usr/local/bin/orbit
-ssh root@server 'chmod 755 /usr/local/bin/orbit && orbit version'
+
+# or build from source (Go 1.27+, make)
+make build && make install
 ```
 
-### From source
+Full instructions, including the `go install` caveat:
+[getting-started.md](docs/usage/getting-started.md#1-install).
 
-Requires **Go 1.27+** and `make`. CGO is not needed.
+## Usage
 
-```bash
-git clone https://github.com/Nimatattic/Orbit.git
-cd Orbit
-make build            # -> bin/orbit
-make install          # -> /usr/local/bin/orbit
-```
+All usage documentation lives in **[`docs/usage/`](docs/usage/README.md)**. This README
+stays an overview; every command, flag and workflow is documented there.
 
-> The Go module path is `github.com/Crequency/orbit`, so `go install` against the GitHub URL
-> does not work yet. Use the clone-and-build path above.
-
-### First steps
-
-```bash
-orbit account add --alias main      # secrets are read without echo and stored 0600
-orbit doctor                        # config, credentials, access and locale self-check
-orbit account test --accounts=main  # per-product probes and credential identity
-orbit about                         # build, paths, credential and audit status
-```
-
-`orbit about` is the fastfetch-style identity card:
-
-```text
- ###  ####  ####  ##### #####  Orbit v0.1.0
-#   # #   # #   #   #     #    a1b2c3d · 2026-10-18T04:00:00Z
-#   # #   # #   #   #     #    ──────────────────────────────────────────
-#   # ####  ####    #     #    platform     Tencent Cloud
-#   # # #   #   #   #     #    accounts     2 (main, backup)
-#   # #  #  #   #   #     #    products     ssl, cdn, teo
- ###  #   # ####  #####   #    locale       en-US
-                               data         ~/.orbit
-                               config       ~/.orbit/config.yaml
-                               credentials  ~/.orbit/credentials.yaml  0600
-                               audit        ~/.orbit/audit/audit.jsonl  12 runs
-                               runtime      go1.27.1 linux/amd64
-```
-
-## Usage Guide
-
-### Modes
-
-Orbit decides how to behave from the flags *and* the terminal:
-
-| You run | What happens |
+| Topic | Document |
 | --- | --- |
-| `orbit` / `orbit status` on a TTY | Full-screen TUI, one tab per account |
-| `orbit update --ssl` on a TTY | TUI: scan → plan → confirm with `y` → live progress |
-| `orbit update --ssl --yes` | Batch mode: writes without prompting (cron, systemd) |
-| `orbit update --ssl --dry-run` | Plan only, never writes |
-| any command without a TTY | Plain text; without `--yes`, `update` only prints the plan |
-| `--no-tui` / `--json` | Force text / structured output |
+| Install, first account, demo mode | [getting-started.md](docs/usage/getting-started.md) |
+| Dry-run vs `--yes`, TUI vs text, exit codes | [modes.md](docs/usage/modes.md) |
+| Every command and flag | [commands.md](docs/usage/commands.md) |
+| Matching, applying, cleanup gates, backups | [certificates.md](docs/usage/certificates.md) |
+| DNS zones and records, propagation checks | [dns.md](docs/usage/dns.md) |
+| Interactive screens and keys | [tui.md](docs/usage/tui.md) |
+| Credentials, rotation, account selection | [accounts.md](docs/usage/accounts.md) |
+| CAM permissions and policy generation | [permissions.md](docs/usage/permissions.md) |
+| Configuration files and keys | [configuration.md](docs/usage/configuration.md) |
+| Errors, surprises and fixes | [troubleshooting.md](docs/usage/troubleshooting.md) |
 
-### Commands
-
-| Command | Purpose |
-| --- | --- |
-| `orbit` | Status overview across all accounts (TUI on a terminal) |
-| `orbit dash` | Console for one account: apply, clean, overview, self-test |
-| `orbit status` | Certificate and resource inventory, pending changes, cleanup candidates |
-| `orbit update --ssl` | Match certificates to domains and apply them |
-| `orbit clean --ssl` | Delete certificates that no cloud resource uses |
-| `orbit account add \| list \| remove \| test` | Manage credentials and verify access |
-| `orbit account guide` | Choose platform/products/scope → minimal permission list + paste-ready policy |
-| `orbit doctor` | Environment self-check |
-| `orbit dns zones` | List hosted DNS zones |
-| `orbit dns ls <zone>` | List records (`--type`, `--name`, `--keyword`) |
-| `orbit dns set <zone> <name> <type> <value>` | Create or update one record (idempotent; `--yes` writes) |
-| `orbit dns rm \| enable \| disable <zone> <id...>` | Delete, enable or disable records |
-| `orbit dns check <zone> <name> <type>` | Compare the configured record with public DNS |
-| `orbit dns` | Interactive DNS console (zones, records, create/edit/delete) |
-| `orbit config show \| set` | Inspect and change configuration |
-| `orbit about` | Identity card: logo, build, paths, audit status |
-| `orbit version` | Version, commit and build date |
-
-### The console — `orbit dash`
-
-One account, one screen, every action. The console reopens after each function, so a session
-reads as *apply → back → clean → back → quit*. If an account is unusable (missing credential),
-the console still opens and shows the failure instead of failing at the door.
-
-```text
-╭─ Orbit · console ────────────────────────────────────────────────────────────────────────────╮
-│account demo · products cdn, teo  updated 04:03:26                                            │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ overview ───────────────────────────────────────────────────────────────────────────────────╮
-│certificates 7 (uploaded 6 / in use 4 / unused 2) · resources 4 (unbound 2 · foreign 1)       │
-│to apply 4 · cleanup candidates 1 · warnings 0                                                │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ functions ──────────────────────────────────────────────────────────────────────────────────╮
-│▸ Apply certificates  4 pending                                                               │
-│  Clean certificates  1 candidates                                                            │
-│  Status overview (all accounts)                                                              │
-│  Environment self-test                                                                       │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-
-↑/↓ move  ·  enter run  ·  d checks  ·  r rescan  ·  q quit
-```
-
-### The permission guide — `orbit account guide`
-
-Stop guessing which CAM actions to grant. Choose the vendor, the products and how far you want
-Orbit to go; the guide prints the exact action list, why each one is needed, and a policy
-document you can paste into **CAM console → Policies → Create custom policy → by policy
-syntax**.
+The three most common commands:
 
 ```bash
-orbit account guide                                  # TUI: p shows the JSON, w saves it
-orbit account guide --scope=read --products=cdn      # plain text
-orbit account guide --scope=full --policy > policy.json
+orbit status                      # what is here, what needs doing (TUI on a terminal)
+orbit update --ssl --dry-run      # plan; add --yes to apply
+orbit clean --ssl --older-than=7d # candidates and the reason for every skip
 ```
-
-```text
-╭─ 3. Usage level ─────────────────────────────────────────────────────────────────────────────╮
-│  (•) Inspection only  status / doctor / --dry-run, never writes                              │
-│  ( ) Apply certificates  update --yes: deploy certificates to domains                        │
-│  ( ) Full (apply + cleanup)  clean --yes: delete certificates no resource uses               │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ 9 permissions needed ───────────────────────────────────────────────────────────────────────╮
-│read    cdn:DescribeDomainsConfig                  read CDN domains and their HTTPS certifica…│
-│read    ssl:CreateCertificateBindResourceSyncTask  start the "which resources use this certif…│
-│read    ssl:DescribeCertificates                   list the certificate pool for matching and…│
-│read    sts:GetCallerIdentity                      (no grant needed) verify which account the…│
-│… 2 more, scroll down                                                                         │
-╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-tab list  ·  ↑/↓ move  ·  space toggle  ·  p show policy JSON  ·  q quit
-```
-
-Every grantable action cites the official Tencent Cloud interface list it comes from
-(`ssl`, `cdn`, `teo`). `sts:GetCallerIdentity` appears in the list but is **never written into
-the policy**: it needs no grant, and CAM rejects a document containing an unknown action.
-Ready-made policies live in [`docs/cam/`](docs/cam).
-
-### Applying certificates — `orbit update`
-
-```bash
-orbit update --ssl --dry-run                                  # review the plan
-orbit update --ssl --accounts=main --domains=www.example.com --yes
-orbit update --ssl --all-accounts --yes --json --no-progress  # cron
-```
-
-Groups *(product × target certificate × strategy)* run concurrently; results are printed in
-group order so a cron log stays diff-able. Each domain reports one of:
-
-| Result | Meaning |
-| --- | --- |
-| `[ok]` | Written **and** confirmed by reading the product back |
-| `[unverified]` | Write accepted, but read-back did not confirm within the budget — check `orbit status`, do not blindly re-run |
-| `[failed]` | The cloud rejected the call; error code plus an actionable hint are printed |
-
-### Cleaning up — `orbit clean`
-
-```bash
-orbit clean --ssl --dry-run            # candidates and the reason for every skip
-orbit clean --ssl --yes --older-than=7d
-```
-
-A certificate is only deleted when **all four gates** pass, the cloud's binding query returned
-complete evidence, and the backup was written. Everything else is reported as a skipped
-candidate with its reason — never silently ignored.
-
-### DNS management — `orbit dns`
-
-Records for every hosted zone, without leaving the terminal:
-
-```bash
-orbit dns zones                                   # hosted zones, record counts, plan
-orbit dns ls example.com                          # all records
-orbit dns ls example.com --type CNAME --keyword cdn
-orbit dns set example.com app A 203.0.113.50      # plan only
-orbit dns set example.com app A 203.0.113.50 --yes
-orbit dns set example.com _acme-challenge TXT "$TOKEN" --ttl 60
-orbit dns disable example.com 12 --yes
-orbit dns rm example.com 12 --yes
-orbit dns check example.com www CNAME             # is it live in public DNS?
-```
-
-With several accounts registered, `dns ls <zone>` queries them all and **skips the ones
-that do not host the zone** (DNSPod answers `OperationDenied.NoPermissionToOperateDomain`,
-which is an ownership fact, not a permission problem). Pass `--accounts=<alias>` to query a
-single account.
-
-`dns set` is **idempotent**: it matches by (name, type), so the same command in cron
-skips an identical record, updates a changed one, and creates a missing one. Writes are
-dry-run unless `--yes` is given, every change is read back, and every change lands in the
-audit log. Multi-record (round-robin) names are refused rather than guessed — target one
-with `--record-id`.
-
-`dns` with no subcommand opens the console:
-
-```text
-╭─ Orbit · DNS console ────────────────────────────────────────────────────────────────────────────────╮
-│account demo · DNS                                                                                    │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ hosted zones ───────────────────────────────────────────────────────────────────────────────────────╮
-│▸ example.com                  7        免费版                                                        │
-│  example.org                  2        专业版                                                        │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ records · example.com (7) ──────────────────────────────────────────────────────────────────────────╮
-│    ID      NAME                   TYPE   VALUE                              TTL    STATE             │
-│▸  1       @                      A      203.0.113.10                       600    enabled            │
-│   5       @                      MX     mail.example.net                   600    enabled            │
-│   6       @                      TXT    v=spf1 include:example.net -all    600    enabled            │
-│   3       api                    A      203.0.113.11                       120    enabled            │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────────╯
-↑/↓ move  ·  ←/→ zone  ·  n new  ·  e edit  ·  d delete  ·  space enable/disable  ·  / filter
-```
-
-Validated locally before any API call: A/AAAA addresses, CNAME/NS targets, MX priority
-1–20, TXT length, SRV arity and CAA tags, hostname label rules, TTL bounds.
-
-### TUI keys
-
-| Key | Action |
-| --- | --- |
-| `↑` `↓` / `j` `k` | Move the cursor |
-| `space` | Toggle the row under the cursor |
-| `a` / `n` | Select all / clear the selection |
-| `s` | Switch between the *to apply* and *cleanup* lists |
-| `u` / `enter` | Apply the selected changes (nothing selected = all) |
-| `c` | Clean the selected candidates (nothing selected = all) |
-| `tab` / `1`–`9` | Switch account |
-| `r` | Rescan the current account |
-| `p` / `w` | (guide) Show the policy JSON / save it to a file |
-| `n` / `e` / `d` | (dns) New record / edit the selected one / delete it |
-| `←` / `→` | (dns) Switch zone; `/` filters the record list |
-| `q` / `esc` | Quit / cancel without writing |
-
-### Exit codes
-
-Designed for cron and CI:
-
-| Code | Meaning |
-| --- | --- |
-| `0` | Success, including no-op runs and dry-runs |
-| `1` | Fatal error (bad config, auth failure, unexpected cloud error) |
-| `2` | Partial failure — some changes succeeded, some did not |
-| `3` | Pending changes detected (`--fail-on-changes`) |
-| `4` | Refused by a safety gate (incomplete evidence, ambiguous account, missing role) |
-
-```bash
-# Alert when the weekly plan is non-empty, without writing anything:
-orbit update --ssl --all-accounts --dry-run --fail-on-changes --json --no-progress
-```
-
-## Configuration
-
-Everything lives in `~/.orbit/` (override with `ORBIT_HOME`):
-
-| Path | Contents | Mode |
-| --- | --- | --- |
-| `config.yaml` | Accounts, products, concurrency, cleanup policy | `0644` |
-| `credentials.yaml` | Secrets (**never** read from `tccli`) | `0600` enforced |
-| `audit/audit.jsonl` | Append-only change log | `0600` |
-| `backups/<account>/<cert>-<stamp>/` | `cert.pem`, `chain.pem`, `key.pem`, `meta.json` | dir `0700`, key `0600` |
-| `cache/` | Reserved for status caching | — |
-
-```yaml
-language: en-US
-defaults:
-  products: [cdn, teo]
-  concurrency:
-    changes: 2            # write groups in flight
-  clean:
-    older-than: 7d
-    require-full-evidence: true
-  edgeone:
-    replace-free-cert: true
-platforms:
-  tencent:
-    accounts:
-      - alias: main
-        credential:
-          source: env     # store | env | file
-          secret-id-env: ORBIT_TENCENT_MAIN_SECRET_ID
-          secret-key-env: ORBIT_TENCENT_MAIN_SECRET_KEY
-```
-
-Configuration precedence is local file → global file → defaults; `--local` / `--global` choose
-which file `orbit config set` writes.
-
-## Permissions
-
-Three least-privilege tiers, generated from the code and guarded by a test that reflects over
-the provider's SDK interfaces:
-
-| File | Actions | Use it for |
-| --- | --- | --- |
-| [`docs/cam/readonly.json`](docs/cam/readonly.json) | 10 | `status`, `doctor`, `account test`, every `--dry-run` |
-| [`docs/cam/execute.json`](docs/cam/execute.json) | 15 | `orbit update --ssl --yes` |
-| [`docs/cam/delete.json`](docs/cam/delete.json) | 19 | `orbit clean --ssl --yes` |
-
-Recommended: a **read-only** API account on the machine that inspects, and a separate
-**execute** account on the machine that writes. One console-side grant is also required: the
-service role `SSL_QCSLinkedRoleInReplaceLoadCertificate`.
-
-## Safety model
-
-- **Dry-run by default.** Writing requires `--yes`; without a TTY the plan is printed and the
-  process exits `0`.
-- **Plans are idempotent** and explain every row.
-- **Deletes are gated, evidenced and backed up** — see [Features](#features).
-- **Refusals are loud.** Incomplete evidence, ambiguous accounts, a missing service role: all
-  exit `4` rather than doing something plausible.
-- **The audit log is append-only** and records before/after certificate IDs, so "what changed
-  last Tuesday" is answerable without the cloud.
 
 ## How to Dev
 
@@ -427,17 +127,16 @@ make lint                        # vet + golangci-lint when installed
 make release                     # three static binaries into dist/
 ```
 
-The test suite never touches the network. The cloud is reached through narrow
-`sslAPI` / `cdnAPI` / `teoAPI` / `stsAPI` interfaces, which tests implement with fakes:
-pagination, retries, half-open poll loops, permission errors and connection reuse are all
-replayed locally. TUI screens are Bubble Tea models, so their state machines are unit-tested
-without a terminal.
+The test suite never touches the network: the cloud is reached through narrow
+`sslAPI` / `cdnAPI` / `teoAPI` / `dnspodAPI` / `stsAPI` interfaces that tests implement with
+fakes — pagination, retries, half-open poll loops, permission errors. TUI screens are
+Bubble Tea models, so their state machines are unit-tested without a terminal.
 
-| Package | What is covered |
+| Package | Covered |
 | --- | --- |
-| `internal/core` | Matching, ranking, plan building, cleanup gates |
-| `internal/cloud/tencent` | SDK interaction, error mapping, permission table, policy generation |
-| `internal/render/tui` | Model state machines, layout geometry (including CJK widths) |
+| `internal/core` | Matching, ranking, plans, cleanup gates, DNS validation |
+| `internal/cloud/tencent` | SDK interaction, error mapping, permission table, policies |
+| `internal/render/tui` | Model state machines, layout geometry (CJK widths included) |
 | `internal/cli` | Flags, mode selection, output formats, backups, audit |
 | `internal/config`, `internal/credential`, `internal/i18n` | Merge precedence, secret storage, catalogue parity |
 
@@ -448,16 +147,7 @@ python3 scripts/gen-banner.py     # rewrites assets/banner.svg
 ```
 
 `TestAboutLogoMatchesBanner` renders the SVG back into a bitmap and fails if it ever
-disagrees with `orbit about`, so editing one without the other cannot slip through.
-
-Working on the UI? `--demo` gives you a complete fake account with certificates, domains,
-pending changes and cleanup candidates:
-
-```bash
-./bin/orbit --demo status
-./bin/orbit --demo update --ssl --progress
-./bin/orbit --demo dash
-```
+disagrees with `orbit about`.
 
 ## Structure
 
@@ -465,12 +155,13 @@ pending changes and cleanup candidates:
 cmd/orbit/                 entry point (thin main)
 internal/
   cli/                     commands, flags, mode selection, output, about card
-  core/                    pure domain logic: model, matching, plan, safety gates
+  core/                    pure domain logic: model, matching, plan, safety gates, DNS rules
   cloud/                   Provider interface + offline demo provider
-    tencent/               Tencent Cloud: SSL, CDN, EdgeOne, DNSPod, STS; permissions & policies
+    fake/                  the --demo fixture
+    tencent/               Tencent Cloud: SSL, CDN, EdgeOne, DNSPod, STS; permissions
   render/
     plain/                 text output for scripts
-    tui/                   Bubble Tea screens: console, status, run, guide, picker
+    tui/                   Bubble Tea screens: console, status, run, guide, DNS, picker
   audit/                   append-only JSONL run log
   config/                  layered config, paths, defaults
   credential/              secret storage (0600) and resolution
@@ -478,9 +169,10 @@ internal/
   exitcode/                exit-code contract and error wrapping
   tty/  version/           terminal detection, build metadata
 assets/                    banner poster (SVG, pixel wordmark)
+docs/usage/                user documentation (installation, commands, TUI, DNS, …)
+docs/                      operations, design, API notes, verification, CAM policies
 locales/                   embedded message catalogues (key parity enforced by test)
-docs/                      design, operations, API notes, verification guides, CAM policies
-scripts/                   cron / systemd examples
+scripts/                   cron / systemd examples, banner generator
 testdata/                  fixtures
 ```
 
@@ -488,7 +180,8 @@ testdata/                  fixtures
 
 | Document | What it covers |
 | --- | --- |
-| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Install, cron/systemd, permissions, rollback, troubleshooting |
+| **[docs/usage/](docs/usage/README.md)** | **All usage: install, commands, TUI, DNS, permissions, config, troubleshooting** |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Deployment: cron/systemd, audit queries, rollback, upgrades |
 | [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | Architecture, milestones, interface inventory |
 | [docs/TENCENT_API_NOTES.md](docs/TENCENT_API_NOTES.md) | Verified cloud behaviour and every open question |
 | [docs/VERIFY_M1.md](docs/VERIFY_M1.md) | Step-by-step verification against a real account |
@@ -498,52 +191,13 @@ testdata/                  fixtures
 
 - [x] **M0–M2** — skeleton, read-only inventory against a real account, matching engine
 - [x] **M3–M4** — apply with read-back verification, gated cleanup with backups and audit
-- [x] **M5** — TUI: overview with tabs, per-account console, permission guide
+- [x] **M5** — TUI: overview, per-account console, permission guide
 - [x] **M6** — static releases, operations manual, CAM templates, `orbit about`
+- [x] **DNS** — zones and records over CLI and TUI
 - [ ] Additional providers (Alibaba Cloud, AWS)
 - [ ] Per-domain certificate pairs (RSA + SM2) instead of a single binding
 - [ ] `orbit restore` — re-upload a certificate straight from `~/.orbit/backups`
 - [ ] CI (vet + tests + release) and signed tags
-
-## FAQ
-
-<details>
-<summary><b><code>clean</code> refuses to run — why?</b></summary>
-
-Deletion needs complete evidence. If a product could not be scanned (no permission, service not
-enabled), `clean` exits `4` instead of guessing. Fix the permission, or explicitly accept the
-risk with `--permit-partial-scan`.
-</details>
-
-<details>
-<summary><b>Why is <code>sts:GetCallerIdentity</code> missing from the generated policy?</b></summary>
-
-Because it needs no grant, and CAM rejects a policy containing an unknown action — one bad
-entry invalidates the whole document. The identity probe works without it.
-</details>
-
-<details>
-<summary><b>What does <code>[unverified]</code> mean?</b></summary>
-
-The write was accepted but the product did not report the new certificate within the read-back
-budget (2 minutes). The change is probably applied; confirm with `orbit status` instead of
-re-running blindly.
-</details>
-
-<details>
-<summary><b>A CDN domain fails with <code>FailedOperation.CdnConfigError</code></b></summary>
-
-The usual cause is that CDN acceleration is switched off for that domain. Enable it under
-domain management in the console, then retry. Orbit maps the cloud message to that hint.
-</details>
-
-<details>
-<summary><b>Why does Orbit not read my <code>tccli</code> credentials?</b></summary>
-
-Deliberate: Orbit keeps its own store with `0600` and refuses to start when the file is more
-permissive. Silently sharing another tool's credential cache is how secrets end up in the wrong
-logs.
-</details>
 
 ## Contributing
 
@@ -562,14 +216,13 @@ Issues and pull requests are welcome. Before opening one:
 - No credentials, tokens or private keys are stored in this repository.
 - `~/.orbit/credentials.yaml` must be `0600`; Orbit refuses to start otherwise.
 - Audit records never contain secrets — only identifiers and outcomes.
-- Report vulnerabilities privately via GitHub **Security → Report a vulnerability** rather than
-  a public issue.
+- Report vulnerabilities privately via GitHub **Security → Report a vulnerability**.
 
 ## License
 
-No license file has been added yet. Until one is, the code is all-rights-reserved. **Choose a
-license before publishing** — MIT is the simplest option for a tool like this; Apache-2.0 adds
-an explicit patent grant.
+No license file has been added yet. Until one is, the code is all-rights-reserved.
+**Choose a license before publishing** — MIT is the simplest option for a tool like this;
+Apache-2.0 adds an explicit patent grant.
 
 ## Star History
 

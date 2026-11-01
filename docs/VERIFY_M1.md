@@ -251,182 +251,27 @@ M1 里最容易出错的一点：EdgeOne 域名的证书配置由 `Certificate.M
 - 如果 5 分钟内仍有任务未完成，Orbit 会打出 `scan warning`（证据不完整）；此时 `clean` 会拒绝执行，`status` 的 `in_use` 计数对这些证书是不完整的。
 
 
-## 交互式 TUI（不带 `--yes` / `--dry-run`）
+## 界面验证清单
 
-在终端里直接跑 `orbit update --ssl`（或 `orbit clean --ssl`）会进入全屏交互界面：
+界面本身怎么用写在 [tui.md](usage/tui.md)、[dns.md](usage/dns.md) 与
+[permissions.md](usage/permissions.md)；这里只列**要亲眼确认的行为**。
 
-```
-Orbit · 应用证书 · main                                       12s
-产品：cdn, teo
-
-执行中：已生效 3，未确认 0，失败 1，处理中 3
-
-  ⠋   TEO    hadoop.2.lab.frp.example.com    arulzk3q     等待生效 8s
-  ✓   TEO    hadoop.1.lab.frp.example.com    arulzk3q     已生效
-  ✗   CDN    cx-checkin.apps.example.com     at8eACUd     失败  FailedOperation.CdnConfigError
-  ·   CDN    static.example.com              at8eACUd     待处理
-```
-
-要点：
-
-| 行为 | 说明 |
-| --- | --- |
-| 确认页 | 列出**将要写入的每一条**变更（产品 / 域名 / 目标证书）；`y` 或回车执行，`n` / `esc` 取消，取消时**不写任何内容** |
-| 动态等待 | 等待云端回报的那一行显示**转动的进度指示 + 已等待秒数**，不会再出现"卡住"的观感 |
-| 并发 | 与批处理模式一致：不同（产品 × 证书 × 策略）分组并行，组内按产品规则串行 |
-| 退出 | 结束后按回车或 `q` 退出；终端恢复后会把同一批结果以**文本形式**再打印一遍，便于留痕 |
-| 取消/中断 | `ctrl+c` 或 `esc` 会取消上下文；已经提交的变更不会回滚（云端无法回滚），未提交的不会执行 |
-| `--no-tui` | 强制纯文本模式（等同批处理/计划输出） |
-
-## 权限向导（`orbit account guide`）
-
-```bash
-./bin/orbit account guide                                   # TUI
-./bin/orbit account guide --scope=read --products=cdn       # 文本
-./bin/orbit account guide --scope=full --policy             # CAM 策略 JSON
-./bin/orbit account guide --scope=nope                      # 应报错（退出码 1）
-```
-
-| 检查项 | 期望 |
-| --- | --- |
-| 三条轴联动 | 只读 9 个 action → 应用 11 → 完整 14（全产品时）；取消 CDN/EdgeOne 后对应 action 消失 |
-| 必需项 | SSL 证书服务带「（必需）」，按空格无法取消 |
-| 用途说明 | 每条 action 都有一句中文用途，不出现 `perm.*` 原始键 |
-| 服务角色 | 只在「应用证书」及以上范围才显示 `SSL_QCSLinkedRoleInReplaceLoadCertificate` |
-| 取值校验 | `--scope` 非法值报错退出，不会静默按"完整"处理 |
-| 策略一致 | `--policy` 的输出与 `docs/cam/*.json` 中同档位的文件一致（有测试保证） |
-| 策略视图 | 按 `p` 进入独立视图：上方 4 步粘贴指引，下方完整 JSON 可滚动；`p`/`esc` 返回向导，`q` 退出 |
-| 策略名 | 跟随当前选择：只读=`orbit-readonly`、应用=`orbit-apply`、完整=`orbit-full` |
-| JSON 语法 | 只有 `version` 与 `statement`；每条语句只有 `effect`/`action`/`resource`，**没有 `sid`**；action 为 `service:Action` 形式 |
-| 无需授权项 | `sts:GetCallerIdentity` 在向导里标注「无需授权」，**不出现在策略 JSON 里**（控制台遇到未知 action 会拒绝整份策略） |
-| 权限出处 | 文本模式与策略视图底部列出 action 的官方接口列表 URL（ssl/cdn/teo 三份），可直接核对 |
-| 初始选择 | `--scope`/`--products` 会预选向导中的范围与产品（不传时从只读、全产品开始） |
-| 保存（`w`） | 策略视图里按 `w` 弹出路径输入框，默认 `./orbit-account-policy.json`；回车保存、`esc` 取消；成功显示绝对路径，文件权限 0600 |
-| 保存路径处理 | 以 `/` 结尾或指向已存在目录 → 自动拼默认文件名；`~/` 会展开；父目录自动创建 |
-| 输入隔离 | 输入框打开时按键全部进入输入（路径含 `q`/`p`/`w` 不会误触发退出或切换），只有 `esc`/`ctrl+c` 例外 |
-
-## DNS 管理（`orbit dns`）
-
-```bash
-./bin/orbit dns zones
-./bin/orbit dns ls example.com --type CNAME
-./bin/orbit dns set example.com app A 203.0.113.50            # 计划
-./bin/orbit dns set example.com app A 203.0.113.50 --yes      # 写入
-./bin/orbit dns set example.com app A 203.0.113.50 --yes      # 再跑一次应为"无需变更"
-./bin/orbit dns disable example.com <id> --yes
-./bin/orbit dns rm example.com <id> --yes
-./bin/orbit dns check example.com www CNAME
-./bin/orbit dns                                               # TUI
-```
-
-| 检查项 | 期望 |
-| --- | --- |
-| 只读命令 | `zones` / `ls` 不需要 `--yes`；`--json` 输出数组 |
-| 默认安全 | `set` / `rm` / `enable` / `disable` 不带 `--yes` 时只打印计划，云端无变化 |
-| 幂等 | 同一 `set` 连跑两次，第二次提示已是最新值，不产生重复记录 |
-| 本地校验 | `A` 传域名、`AAAA` 传 IPv4、CNAME 放在 `@`、TXT 超 255 字节等情况在本地就被拒绝，不会发请求 |
-| 回读 | 写入结果带 `read-back verified`；未回读到时显示 `unverified` |
-| 多值记录 | 同名同类型存在多条时 `set` 拒绝并要求 `--record-id`，不会误改 |
-| 账号歧义 | 多账号下写操作要求 `--accounts`，否则退出码 4 |
-| TUI | `orbit dns` 可切换域名、`n` 新建、`e` 编辑、`d` 删除（需 `y` 确认）、空格启停、`/` 过滤 |
-| 多账号 | `dns ls <域名>` 跳过不托管该域名的账号并给出提示；全部账号都不托管时退出码 1（`dns.zone_not_hosted`）；真正的权限错误仍为退出码 2 |
-| DNS 探针 | `orbit account test` 会多出一行「云解析 DNS」，单独反映 `dnspod:DescribeDomainList` 是否可用 |
-
-## 总控台（`orbit dash`）
-
-```bash
-./bin/orbit dash                    # 多账号时先弹单选列表
-./bin/orbit dash --accounts=main    # 指定账号，跳过选择
-```
-
-| 行为 | 说明 |
-| --- | --- |
-| 账号选择 | 多个账号时单选（`↑/↓` + 回车；`space` 同样确认），`esc` 取消且不写任何内容 |
-| 概览 | 证书/资源统计 + 待处理/可清理/告警计数；徽标在扫描失败时**不显示 0**（未知≠零） |
-| 功能 | 应用证书、清理证书、状态总览（全部账号）、环境自检 |
-| 执行后 | 功能跑完自动回到总控台，并重新扫描刷新计数 |
-| 环境自检 | `d` 展开/收起；显示凭证、Identity、逐产品可达性与服务角色；结果缓存，`r` 重测 |
-| 账号不可用 | 依然进入总控台，失败显示在概览与自检面板；只读的状态总览仍可进入，写操作被拒绝 |
-| 非 TTY | 报错退出，提示改用 `orbit status/update/clean` |
-
-## 状态总览 TUI 与账号多选
-
-不带参数运行 `orbit`（或 `orbit status`）在终端下会打开总览：**每个（平台 · 账号）一个 Tab**。
-
-```
-Orbit · 状态总览
- [1 hk !]  2 main (7)
-  证书 16（上传 16 / 在用 9 / 未用 7） · 资源 38（未绑定 2 · 外部证书 1）
-  产品：cdn, teo        更新于 22:41:55
-
-  待处理（7）
-    CDN    cx-checkin.apps.example.com             at8eACUd
-    TEO    hadoop.1.lab.frp.example.com            arulzk3q
-  可清理（3）
-    1panel-test-2025                               c-1005
-  扫描告警（1）
-    teo — UnauthorizedOperation
-
-tab / 1-9 切换账号   r 重新扫描   u 应用证书   c 清理证书   q 退出
-```
-
-| 行为 | 说明 |
-| --- | --- |
-| 界面 | 全屏面板（圆角边框、标题嵌在顶边）；底栏快捷键提示按终端宽度自适应，窄屏优先保留 `u`/`c`/`q` |
-| 逐账号扫描 | 一次只扫一个账号，**先扫完的 Tab 立刻可看**，不必等其它账号 |
-| Tab 标记 | 正在扫描 `⠋`；失败 `!`；有待办时显示条数 `(7)` |
-| 选择框 | `↑`/`↓` 移动，`space` 勾选，`a` 全选，`n` 取消全选；勾选数显示在面板标题（如 `已选 2`） |
-| `s` | 在「待处理」与「可清理」列表之间切换焦点（只有聚焦的列表才显示选择框） |
-| `u` / `enter` | 对**勾选的**待处理条目生成应用计划；**未勾选任何条目时等同于全部** |
-| `c` | 对**勾选的可清理**条目执行清理；未勾选时等同于全部 |
-| `r` | 只重扫当前 Tab（失败后想重试就用它，失败不会自动重试） |
-| 文本模式 | 非终端下退化为纯文本；某个账号失败**不影响其它账号**（退出码 2，并逐条列出失败原因） |
-
-**账号多选**：登记了多个账号时，`orbit update --ssl` / `orbit clean --ssl` 会先显示多选器：
-
-```
-Orbit · 选择要应用证书的账号
-> [x] hk    credential env · products cdn, teo
-  [ ] main  credential store · products cdn, teo
-已选 1/2
-↑/↓ 移动   空格 选择   a 全选   回车 确认   esc 取消
-```
-
-一个都没选时按回车会被拒绝并提示；`esc` 取消则**不写任何内容**。选定后每个账号依次进入确认页（每个账号都要单独确认，避免误伤）。若用 `--accounts=` / `--all-accounts` 指定，则跳过选择器；批处理模式（`--yes`）下多账号仍需显式指定，否则拒绝执行（退出码 4）。
-
-## 执行阶段（`--yes`）的进度与等待
-
-出计划之后、真正下发之前，Orbit 会打印计划表；下发过程中同样有进度：
-
-```
-[   2.1s] 执行：cdn × 2 个域名（目标证书 atVfBzFA）
-[   2.1s]   [1/2] www.example.com → atVfBzFA
-[   2.2s]   已提交，等待生效：www.example.com
-[   7.4s]   已提交，等待生效：static.example.com
-[  12.6s]   等待生效：www.example.com（状态 deploying，已等待 10s）
-[  22.1s]   已生效：www.example.com
-[  22.3s]   已生效：static.example.com
-  [ok]  cdn  www.example.com     atVfBzFA
-  [ok]  cdn  static.example.com  atVfBzFA
-[  22.5s] 执行完成：成功 2，未确认 0，失败 0
-```
-
-几个要点：
-
-| 行为 | 说明 |
-| --- | --- |
-| 「已提交，等待生效」 | 写入已被接受，正在**回读复核**：CDN 轮询 `Https.SslStatus` 到 `deployed`；EdgeOne 轮询 `Certificate.List[].Status` 到 `deployed` |
-| 「等待生效 …（状态 X，已等待 Ns）」 | 每 5 秒一次，说明还没生效但**没有卡死**；单次上限 **2 分钟**（`VerifyTimeout`，与 SSL 异步部署任务的 5 分钟 `PollTimeout` 分开） |
-| EdgeOne 批量下发 | 同一站点的多个域名在**一次调用**里下发，回读也是**每轮一次站点列表**（不是每个域名轮询一次），所以 6 个域名的等待时间等于 1 个域名 |
-| 超过上限 | **不算失败**：结果行显示 `[unverified]`，并在汇总里计入「未确认」。用 `orbit status` 再过一遍即可，不需要盲目重跑 |
-| 失败 | 结果行显示 `[failed]` + 错误码 + 可行动提示，汇总里计入「失败」。例如 CDN 的 `FailedOperation.CdnConfigError` 会提示检查 HTTPS 开关与访问端口 443 |
-| 多证书域名 | EdgeOne 一个域名可持有多张证书（如 RSA + 国密）：**任意一张等于目标证书即视为"已最新"**，不会再重复下发 |
-| 并发 | 不同「（产品 × 目标证书 × 策略）」分组**并行**，并发度 = `defaults.concurrency.changes`（默认 2，可调大）；同一分组内按产品规则串行（EdgeOne 同站点的多个域名必须在一次调用里下发） |
-| 静默 | `--no-progress`；cron 里推荐加 |
-
-> 注意：**并发度只影响互不相关的分组**。同一个站点/同一张证书的变更仍按顺序处理，这既满足腾讯云"同一证书同一资源类型只能有一个部署任务"的限制，也避免并发写同一个域名的配置。
+| 验证点 | 操作 | 期望 |
+| --- | --- | --- |
+| 总览多 Tab | `orbit` | 每个账号一个 Tab；扫描中 `…`、失败 `!`、待办 `(7)` |
+| 总览多选 | 空格勾选两条，按 `u` | 计划只包含勾选的两条 |
+| 总控台 | `orbit dash` | 概览 / 功能 / 环境自检三块；执行完回到控制台并刷新计数 |
+| 应用进度 | `update --ssl --yes` | 逐条 `submitted → waiting（带秒数）→ verified`；不再出现"无输出卡住" |
+| 未确认语义 | 写入后 2 分钟仍未回读 | 结果行标 `[unverified]`，**不计失败**，提示用 `status` 复核 |
+| 权限向导 | `orbit account guide` | 三轴联动；`p` 出策略 JSON、`w` 存盘、`esc` 返回 |
+| DNS 控制台 | `orbit dns` | 域名切换、`n` 新建、`e` 编辑、`d`+`y` 删除、空格启停、`/` 过滤 |
+| 取消不写入 | 确认页按 `n` / `esc` | 云端无任何变化 |
+| 非 TTY 降级 | `orbit status < /dev/null` | 纯文本，不进入 alt screen |
 
 ## 排错：`UnauthorizedOperation`（操作无权限）
+
+> 其他报错的处置见 [troubleshooting.md](usage/troubleshooting.md)；本节只记录真机上
+> 观察到的具体事实。
 
 即使子账号是 Administrator，也可能遇到：
 

@@ -778,6 +778,10 @@ CLB（`DescribeListeners` + SNI `Rules` + `ModifyDomainAttributes`）、WAF、AP
 
 ## 附录 A：CAM 最小权限策略模板（v1 范围）
 
+> 可粘贴的正式策略文件在 [`docs/cam/`](cam/)（三档，由权限表生成），生成方式与
+> CAM 控制台操作步骤见 [用法文档 · 权限](usage/permissions.md)。下面的附录保留
+> 设计期的推导过程，命令示例不再维护。
+
 ```json
 {
   "version": "2.0",
@@ -857,6 +861,10 @@ CLB（`DescribeListeners` + SNI `Rules` + `ModifyDomainAttributes`）、WAF、AP
 > 另需在控制台一次性授权服务角色 `SSL_QCSLinkedRoleInReplaceLoadCertificate`（部署与"带检查删除"的前置条件）。
 
 ## 附录 B：cron / systemd 用法示例
+
+> 可直接使用的单元文件在 [`docs/OPERATIONS.md`](OPERATIONS.md) 与
+> [`scripts/`](../scripts/)；模式选择、进度输出与退出码见
+> [用法文档 · 模式](usage/modes.md) 与 [命令参考](usage/commands.md)。
 
 ```bash
 # 每周一 03:30 演练（有变更则退出码 3，可触发告警）

@@ -3,6 +3,13 @@
 面向"装到服务器上、由 cron 或人手定期运行"的场景。设计文档见
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)，真机验证步骤见 [VERIFY_M1.md](VERIFY_M1.md)。
 
+> **命令与用法的完整说明集中在 [`docs/usage/`](usage/README.md)**：命令与参数见
+> [commands.md](usage/commands.md)，模式与退出码见 [modes.md](usage/modes.md)，
+> 界面按键见 [tui.md](usage/tui.md)，DNS 见 [dns.md](usage/dns.md)，
+> 权限与策略生成见 [permissions.md](usage/permissions.md)，配置见
+> [configuration.md](usage/configuration.md)，排错见
+> [troubleshooting.md](usage/troubleshooting.md)。本文只讲部署与运维。
+
 ---
 
 ## 1. 安装
@@ -34,6 +41,9 @@ ssh root@server 'chmod 755 /usr/local/bin/orbit && orbit version'
 `ORBIT_HOME` 可整体改路径（见 §5 的 cron 示例）。
 
 ## 3. 权限：三档 CAM 策略
+
+三份策略的生成方式、CAM 控制台操作步骤与最小权限建议见
+[用法文档 · 权限](usage/permissions.md)，这里只列部署时的取舍。
 
 `docs/cam/` 下有三份可直接粘贴到 CAM 控制台的策略，按用途递增：
 
@@ -94,12 +104,14 @@ action 名取自官方接口列表：`ssl` → [98168](https://cloud.tencent.com
 ## 4. 首次运行检查清单
 
 ```bash
-orbit account add --alias main      # 交互录入，落 ~/.orbit/credentials.yaml（0600）
-orbit doctor                        # 配置/凭证/权限/语言包逐项自检
-orbit account test --accounts=main  # 逐产品探测 SSL / CDN / EdgeOne，并显示凭证归属
-orbit                               # 终端下进入总览 TUI（非终端输出文本）
-orbit dash                          # 交互式总控台：选账号 → 应用/清理/总览/自检
+orbit account add --alias main      # 录入凭证（0600）
+orbit doctor                        # 环境自检
+orbit account test --accounts=main  # 逐产品探测 + 凭证归属
+orbit                               # 总览（TUI 或文本）
 ```
+
+完整步骤（含演示模式、`about`、无凭证试跑）见
+[getting-started.md](usage/getting-started.md)。
 
 ## 5. cron 用法
 
@@ -171,26 +183,17 @@ ORBIT_TENCENT_MAIN_SECRET_KEY=xxxxxxxx
 
 ## 6.5 DNS 记录
 
-`orbit dns set` 是幂等的，适合放进 cron：
+DNS 的完整用法（记录类型、校验规则、幂等语义、多账号行为、控制台按键）见
+[dns.md](usage/dns.md)。运维上只需记住一点：`dns set` 幂等，可安全放进 cron。
 
 ```bash
-# 计划（不写云端）
-orbit dns set example.com app A 203.0.113.50
-# 写入；重复执行不会产生重复记录
-orbit dns set example.com app A 203.0.113.50 --yes
-# 证书 DNS-01 校验记录
-orbit dns set example.com _acme-challenge TXT "$TOKEN" --ttl 60 --yes
-# 记录是否已生效（对比公网 DNS）
+# 证书 DNS-01 校验记录；重复执行不会产生重复记录
+orbit dns set example.com _acme-challenge TXT "$TOKEN" --ttl 60 --yes --accounts=main
+# 是否已生效（对比公网 DNS，未生效退出码 3）
 orbit dns check example.com _acme-challenge TXT
 ```
 
 每次写入都会回读确认并写审计（`action: dns.create|update|delete`）。
-
-多账号时 `orbit dns ls <域名>` 会逐个账号查询，**不托管该域名的账号会被跳过**并提示
-（DNSPod 返回 `OperationDenied.NoPermissionToOperateDomain`，这是域名归属问题，
-不是 CAM 授权问题）。只想查一个账号时用 `--accounts=<别名>`。
-`orbit account test` 现在也会探测 `dnspod:DescribeDomainList`，用于单独确认 DNS 权限。
-多值（轮询）同名记录不会被猜测覆盖，需用 `--record-id` 指定。
 
 ## 7. 日常查看
 
@@ -235,15 +238,14 @@ ssh root@server 'mv /usr/local/bin/orbit.bak /usr/local/bin/orbit'
 
 ## 10. 排错速查
 
+命令层面的排错（退出码含义、`[unverified]`、CDN 加速未开启、域名归属、
+凭证权限、语言与进度输出）集中在
+[用法文档 · 排错](usage/troubleshooting.md)。
+
+只属于运维现场的三件事：
+
 | 现象 | 处理 |
 | --- | --- |
-| 退出码 1 + `cloud.err.auth_failed` | 密钥无效：`orbit account add --alias main --force` 重录 |
-| 退出码 1 + `cloud.err.no_permission` | 先看 `orbit account test` 是哪个产品；多半是该产品未开通或策略未覆盖 |
-| 扫描告警 `teo — UnauthorizedOperation` | EdgeOne 未开通/未授权；不用 EdgeOne 就从范围里去掉（`--products=cdn` 或 `defaults.products: [cdn]`），否则 `clean` 会因证据不完整而拒绝执行 |
-| 告警 `产品 — UnauthorizedOperation (站点名)` | 站点类型是 full/partial 却被拒 = 真权限问题；EdgeOne Pages 类型站点会被静默跳过（进度里有一行说明） |
-| `cloud.err.cdn_domain_disabled` | 该域名的 CDN 加速服务已关闭：先去"域名管理"启动域名 |
-| `[unverified]` 结果行 | 写入已提交但 2 分钟内回读未确认；用 `orbit status` 复核，不要盲目重跑 |
-| 退出码 2 | 部分失败：看 `jq` 查审计里的 `result=="failed"` 明细 |
-| 退出码 3 | 演练发现待执行变更（仅 `--fail-on-changes`） |
-| 退出码 4 | 安全闸门拒绝：证据不完整、账号歧义、服务角色未授权、实验性策略未开启 |
-| 关联查询很慢 | 首次是云端异步任务（数十秒到数分钟，上限 5 分钟）；`status` 30 分钟内复用缓存，`update` 不做关联查询 |
+| 想确认某次变更 | `jq -c 'select(.kind=="change" and .result=="failed")' ~/.orbit/audit/audit.jsonl`，或按 `run_id` 串起一次执行 |
+| 需要回滚 | 见 [§8 回滚](#8-回滚)；证书权威源头仍是签发端（如 1Panel） |
+| 感觉"卡住" | 首次关联查询是云端异步任务（上限 5 分钟），`status` 30 分钟内复用缓存；`--progress` 可把进度强制打到 stderr |
