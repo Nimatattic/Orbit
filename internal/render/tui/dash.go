@@ -10,8 +10,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/Crequency/orbit/internal/core"
-	"github.com/Crequency/orbit/internal/i18n"
+	"github.com/Nimatattic/Orbit/internal/core"
+	"github.com/Nimatattic/Orbit/internal/i18n"
 )
 
 // DashJob describes the control console for one account.

@@ -18,17 +18,17 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Crequency/orbit/internal/audit"
-	"github.com/Crequency/orbit/internal/cloud"
-	"github.com/Crequency/orbit/internal/cloud/fake"
-	"github.com/Crequency/orbit/internal/cloud/tencent"
-	"github.com/Crequency/orbit/internal/config"
-	"github.com/Crequency/orbit/internal/core"
-	"github.com/Crequency/orbit/internal/credential"
-	"github.com/Crequency/orbit/internal/exitcode"
-	"github.com/Crequency/orbit/internal/i18n"
-	"github.com/Crequency/orbit/internal/tty"
-	"github.com/Crequency/orbit/internal/version"
+	"github.com/Nimatattic/Orbit/internal/audit"
+	"github.com/Nimatattic/Orbit/internal/cloud"
+	"github.com/Nimatattic/Orbit/internal/cloud/fake"
+	"github.com/Nimatattic/Orbit/internal/cloud/tencent"
+	"github.com/Nimatattic/Orbit/internal/config"
+	"github.com/Nimatattic/Orbit/internal/core"
+	"github.com/Nimatattic/Orbit/internal/credential"
+	"github.com/Nimatattic/Orbit/internal/exitcode"
+	"github.com/Nimatattic/Orbit/internal/i18n"
+	"github.com/Nimatattic/Orbit/internal/tty"
+	"github.com/Nimatattic/Orbit/internal/version"
 )
 
 // DefaultPlatform is the only platform this batch implements (decision A3).
@@ -68,7 +68,6 @@ type App struct {
 	IncludeFree    bool
 	PartialScan    bool
 	BackupDir      string
-	ExpWrite       bool
 
 	Loaded *config.Loaded
 	Bundle *i18n.Bundle

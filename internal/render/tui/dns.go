@@ -13,8 +13,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/Crequency/orbit/internal/core"
-	"github.com/Crequency/orbit/internal/i18n"
+	"github.com/Nimatattic/Orbit/internal/core"
+	"github.com/Nimatattic/Orbit/internal/i18n"
 )
 
 // DNSJob exposes the operations the DNS console needs. The console never talks to

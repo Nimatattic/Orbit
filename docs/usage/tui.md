@@ -2,9 +2,11 @@
 
 [← usage index](README.md) · Which mode you get: [modes.md](modes.md)
 
-Orbit takes over the terminal only when you are on a TTY and neither `--yes` nor
-`--dry-run` was given. Every screen leaves the terminal exactly as it found it, and text
-results are printed again after exit so the scrollback keeps a record.
+Orbit takes over the terminal only when you are on a TTY **and** none of `--yes`,
+`--dry-run`, `--fail-on-changes` or `--json` was given (those flags keep the CLI, because
+their output — a written change, a plan, or an exit code — is the answer). Every screen
+leaves the terminal exactly as it found it, and text results are printed again after exit
+so the scrollback keeps a record.
 
 ## Status overview
 

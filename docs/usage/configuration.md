@@ -12,7 +12,7 @@ Everything lives under `ORBIT_HOME` (default `~/.orbit`):
 | `credentials.yaml` | **0600** | SecretId/SecretKey pairs (enforced on read) |
 | `audit/audit.jsonl` | 0600 | append-only change log |
 | `backups/<account>/<cert>-<stamp>/` | dir 0700 | `cert.pem`, `chain.pem`, `key.pem` (0600), `meta.json` |
-| `cache/` | — | reserved for status caching |
+| `cache/` | — | **does not exist**: nothing creates it. `status` reuses the cloud's 30-minute association cache (disable with `--no-cache`), there is no local cache file |
 
 ```bash
 orbit config path          # which files are read, in order
@@ -35,8 +35,10 @@ orbit config defaults.concurrency.changes=4 --local    # ./.orbit.yaml
 orbit config language=en-US --global
 ```
 
-`config set` is not a subcommand — pass `key=value` directly. Unknown keys are rejected,
-so a typo cannot silently do nothing.
+`config set` is not a subcommand — pass `key=value` directly. Keys written this way are
+validated: an unknown name exits `1`. A **hand-written** `config.yaml` is decoded
+non-strictly, though, so an unknown key in the file is silently ignored; verify the merged
+result with `orbit config show`.
 
 ## Full example
 
@@ -46,14 +48,13 @@ language: en-US
 defaults:
   platforms: [tencent]
   products: [cdn, teo]
-  strategy: product          # product | deploy (deploy is experimental)
+  strategy: product          # auto | product | deploy (auto = each product's own API)
   concurrency:
     products: 3
     changes: 2               # write groups in flight
   timeouts: {}               # provider defaults apply
   cert_preference: []        # e.g. [upload, trustasia]
   domain_match: {}
-  experimental_write: false  # enable the deploy strategy
   edgeone:
     replace_free_cert: true  # switch EdgeOne free certs to pool certificates
   clean:
@@ -101,8 +102,7 @@ a cron environment does not force a language.
 | --- | --- | --- |
 | `defaults.products` | `[cdn, teo]` | Products scanned and written |
 | `defaults.concurrency.changes` | `2` | Write groups in flight (raise it on large fleets) |
-| `defaults.strategy` | `product` | `deploy` needs `experimental_write: true` |
-| `defaults.experimental_write` | `false` | Allows the unified deploy strategy |
+| `defaults.strategy` | `auto` | `auto`/`product` use each product's own API, `deploy` uses the unified SSL deploy API. All three values are supported without any switch; unknown values fail with the accepted list |
 | `defaults.edgeone.replace_free_cert` | `true` | Replace EdgeOne's free certificate with pool certificates |
 | `defaults.clean.older_than` | `7d` | Deletion grace period |
 | `defaults.clean.require_full_evidence` | `true` | Refuse cleanup when a product could not be scanned |

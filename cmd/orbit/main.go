@@ -6,7 +6,7 @@ package main
 import (
 	"os"
 
-	"github.com/Crequency/orbit/internal/cli"
+	"github.com/Nimatattic/Orbit/internal/cli"
 )
 
 func main() {

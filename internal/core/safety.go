@@ -51,6 +51,14 @@ func CleanCandidates(certs []Certificate, evidence map[string]BindingEvidence, r
 		if res.BoundCert != "" {
 			inUse[res.BoundCert] = true
 		}
+		// EdgeOne hosts can hold several certificates at once (for example RSA
+		// and SM2). The primary entry is only what the display shows: every id
+		// the target actually holds keeps that certificate in use.
+		for _, id := range res.BoundCertIDs {
+			if id != "" {
+				inUse[id] = true
+			}
+		}
 	}
 
 	for _, cert := range certs {

@@ -1,10 +1,12 @@
 package i18n
 
 import (
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
-	"github.com/Crequency/orbit/locales"
+	"github.com/Nimatattic/Orbit/locales"
 )
 
 // TestCatalogsShareTheSameKeySet guards against a message that exists in one
@@ -77,6 +79,49 @@ func TestSubstitutionAndMissingKeys(t *testing.T) {
 	}
 	if len(b.Missing()) == 0 {
 		t.Fatal("unknown keys must be recorded by Missing()")
+	}
+}
+
+// TestConcurrentMissingKeysAreSafe is the -race regression for the missing-key
+// ledger: providers report progress from worker goroutines, so several callers
+// can miss a key (the same one or different ones) at the same moment while
+// doctor/a test reads the ledger.
+func TestConcurrentMissingKeysAreSafe(t *testing.T) {
+	b, err := New("en-US")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const workers = 32
+	const keysPerWorker = 50
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func(worker int) {
+			defer wg.Done()
+			for j := 0; j < keysPerWorker; j++ {
+				// Same keys from every worker: the shared map entry is written
+				// concurrently.
+				_ = b.T("no.such.key." + strconv.Itoa(j))
+				// A present key must keep working while the ledger is busy.
+				_ = b.T("plan.summary", "total", worker, "apply", 0, "uptodate", 0, "nocert", 0)
+			}
+		}(i)
+	}
+
+	readDone := make(chan struct{})
+	go func() {
+		defer close(readDone)
+		for i := 0; i < 100; i++ {
+			_ = b.Missing()
+		}
+	}()
+
+	wg.Wait()
+	<-readDone
+
+	if got := len(b.Missing()); got != keysPerWorker {
+		t.Fatalf("missing ledger has %d keys, want %d", got, keysPerWorker)
 	}
 }
 

@@ -12,6 +12,9 @@ import (
 // TestAboutDrawsLogoAndFacts checks the identity card renders the artwork and the
 // facts, and stays free of ANSI codes when stdout is not a terminal.
 func TestAboutDrawsLogoAndFacts(t *testing.T) {
+	// The card renders the resolved data layout; pin it to the default so an
+	// ambient ORBIT_HOME in the environment cannot change the expected "~/.orbit".
+	t.Setenv("ORBIT_HOME", "")
 	app := testApp(t, &stubProvider{})
 	if err := app.runAbout(); err != nil {
 		t.Fatalf("about: %v", err)

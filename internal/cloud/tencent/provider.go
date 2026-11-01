@@ -28,8 +28,8 @@ import (
 	sts "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/sts/v20180813"
 	teo "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/teo/v20220901"
 
-	"github.com/Crequency/orbit/internal/cloud"
-	"github.com/Crequency/orbit/internal/core"
+	"github.com/Nimatattic/Orbit/internal/cloud"
+	"github.com/Nimatattic/Orbit/internal/core"
 	dnspod "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/dnspod/v20210323"
 )
 
@@ -88,32 +88,6 @@ func (p *Provider) limiter(name string) *limiter { return p.limiters[name] }
 
 // Name implements cloud.Provider.
 func (p *Provider) Name() string { return "tencent" }
-
-// Capabilities implements cloud.Provider.
-func (p *Provider) Capabilities() cloud.Capabilities {
-	return cloud.Capabilities{
-		CertGlobal: true,
-		Products: map[core.Product]cloud.ProductCapability{
-			core.ProductCDN: {
-				CanEnumerate: true, CanReadBoundCert: true, CanApplyByCertID: true,
-				CanVerifyAfterDeploy: true, Granularity: "domain",
-				OwnCertField: "Https.CertInfo.CertId",
-			},
-			core.ProductTEO: {
-				CanEnumerate: true, CanReadBoundCert: true, CanApplyByCertID: true,
-				CanVerifyAfterDeploy: true, Granularity: "domain",
-				OwnCertField: "Certificate.List[].CertId",
-			},
-		},
-		// Neither cdn nor teo requires a Region on the deploy call (decision T6).
-		DeployNeedsRegion:   map[core.Product]bool{core.ProductCDN: false, core.ProductTEO: false},
-		AsyncDeploy:         true,
-		DeploySerialPerPair: true,
-		SupportsUnbind:      false,
-		VerifyAfterDeploy:   true,
-		ExtraScopes:         []string{"zone"},
-	}
-}
 
 // Preflight validates credentials and permissions per product.
 //
@@ -295,11 +269,16 @@ func (p *Provider) Scan(ctx context.Context, _ string, scope cloud.ScanScope) (c
 	return res, nil
 }
 
-// countUnfinished reports how many association queries never reached status 1.
+// countUnfinished reports how many association queries are still running.
+//
+// Status 0 is the only unfinished state. Status 2 means the query finished with
+// an error: counting it as pending would misreport a failed query as "still
+// querying", and the failure is already handled by the evidence-completeness
+// gate and the warning path.
 func countUnfinished(evidence map[string]core.BindingEvidence) int {
 	n := 0
 	for _, ev := range evidence {
-		if ev.Status != 1 {
+		if ev.Status == 0 {
 			n++
 		}
 	}
@@ -376,25 +355,24 @@ func (p *Provider) ListBindings(ctx context.Context, _ string, certIDs []string)
 
 // Apply implements cloud.Provider.
 //
-// Changes are grouped by (product, target certificate, strategy) because the API
-// allows only one deploy task per certificate and resource type at a time
-// (decision T7). Groups are independent, so they run with bounded concurrency;
-// results are reassembled in group order so output stays deterministic.
+// Changes are grouped by target certificate because the API allows only one
+// deploy task per certificate and resource type at a time (decision T7). Two
+// strategies that both write the same certificate must therefore never overlap,
+// so a certificate is the unit of serialisation. Inside a certificate group the
+// changes are further split by (product, strategy) so each product path keeps
+// its batching (all EdgeOne hosts of one site still go in a single call), and
+// those sub-groups run one after another. Different certificates are
+// independent, so they run with bounded concurrency; results are reassembled in
+// group order so output stays deterministic.
 func (p *Provider) Apply(ctx context.Context, _ string, plan core.Plan, opts cloud.ApplyOptions) ([]core.Result, error) {
-	order := make([]groupKey, 0, len(plan.Changes))
-	groups := map[groupKey][]core.Change{}
-	for _, ch := range plan.Pending() {
-		if ch.Kind != core.KindApply || ch.To == nil {
-			continue
-		}
-		key := groupKey{product: ch.Product, certID: ch.To.ID, strategy: ch.Strategy}
-		if _, seen := groups[key]; !seen {
-			order = append(order, key)
-		}
-		groups[key] = append(groups[key], ch)
-	}
+	order, groups := groupByCertificate(plan.Pending())
 	if len(order) == 0 {
 		return nil, nil
+	}
+	if opts.DryRun {
+		// A dry run must not reach any write API: report what a real run would
+		// attempt, in the same order, including changes that would fail locally.
+		return dryRunApplyResults(order, groups), nil
 	}
 
 	concurrency := opts.Concurrency
@@ -412,15 +390,15 @@ func (p *Provider) Apply(ctx context.Context, _ string, plan core.Plan, opts clo
 	outcomes := make([]outcome, len(order))
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
-	for i, key := range order {
+	for i, certID := range order {
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(i int, key groupKey) {
+		go func(i int, certID string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			results, err := p.runGroup(ctx, key, groups[key])
+			results, err := p.runCertGroup(ctx, certID, groups[certID])
 			outcomes[i] = outcome{results: results, err: err}
-		}(i, key)
+		}(i, certID)
 	}
 	wg.Wait()
 
@@ -444,10 +422,100 @@ func (p *Provider) Apply(ctx context.Context, _ string, plan core.Plan, opts clo
 	return results, nil
 }
 
+// groupByCertificate buckets the apply changes by target certificate, keeping
+// first-appearance order for deterministic output.
+func groupByCertificate(changes []core.Change) ([]string, map[string][]core.Change) {
+	order := make([]string, 0, len(changes))
+	groups := map[string][]core.Change{}
+	for _, ch := range changes {
+		if ch.Kind != core.KindApply || ch.To == nil {
+			continue
+		}
+		certID := ch.To.ID
+		if _, seen := groups[certID]; !seen {
+			order = append(order, certID)
+		}
+		groups[certID] = append(groups[certID], ch)
+	}
+	return order, groups
+}
+
+// dryRunApplyResults renders the outcome a real run would aim for without
+// calling the cloud. Locally detectable problems (a unified deploy change
+// without an instance id) are reported as failures, because they would fail the
+// same way on a real run.
+func dryRunApplyResults(order []string, groups map[string][]core.Change) []core.Result {
+	out := make([]core.Result, 0, len(groups))
+	for _, certID := range order {
+		subOrder, subGroups := splitByProductStrategy(certID, groups[certID])
+		for _, key := range subOrder {
+			for _, ch := range subGroups[key] {
+				if ch.Strategy == core.StrategyDeploy && ch.InstanceKey == "" {
+					out = append(out, failure(ch, errorWithKey(MsgDeployFailed,
+						fmt.Errorf("%s resource %s has no deployable instance id; use the product strategy", ch.Product, ch.Domain))))
+					continue
+				}
+				out = append(out, core.Result{
+					Change:     ch,
+					OK:         true,
+					Verified:   false,
+					MessageKey: cloud.MsgDryRun,
+				})
+			}
+		}
+	}
+	return out
+}
+
+// groupKey identifies one executable batch inside a certificate group. The
+// certificate is part of the key only for diagnostics: all keys handed to
+// runGroup already belong to the same certificate.
 type groupKey struct {
 	product  core.Product
 	certID   string
 	strategy core.Strategy
+}
+
+// splitByProductStrategy orders the sub-groups of one certificate by
+// first appearance.
+func splitByProductStrategy(certID string, changes []core.Change) ([]groupKey, map[groupKey][]core.Change) {
+	order := make([]groupKey, 0, len(changes))
+	groups := map[groupKey][]core.Change{}
+	for _, ch := range changes {
+		key := groupKey{product: ch.Product, certID: certID, strategy: ch.Strategy}
+		if _, seen := groups[key]; !seen {
+			order = append(order, key)
+		}
+		groups[key] = append(groups[key], ch)
+	}
+	return order, groups
+}
+
+// runCertGroup executes every change of one certificate, one sub-group after
+// another.
+//
+// The serialisation is the point (decision T7): the cloud accepts only one
+// deploy task per certificate and resource type, and overlapping strategies
+// could still collide on the same certificate. Certificates remain independent,
+// so the outer loop keeps its concurrency.
+func (p *Provider) runCertGroup(ctx context.Context, certID string, changes []core.Change) ([]core.Result, error) {
+	order, groups := splitByProductStrategy(certID, changes)
+
+	var (
+		results []core.Result
+		fatal   error
+	)
+	for _, key := range order {
+		res, err := p.runGroup(ctx, key, groups[key])
+		results = append(results, res...)
+		if err != nil && abortOn(err) && fatal == nil {
+			fatal = err
+		}
+	}
+	if fatal != nil {
+		return results, fatal
+	}
+	return results, nil
 }
 
 // runGroup executes every change of one (product, certificate, strategy) group.
@@ -483,14 +551,14 @@ func firstFailure(results []core.Result) error {
 func (p *Provider) applyCDNGroup(ctx context.Context, certID string, changes []core.Change) ([]core.Result, error) {
 	results := make([]core.Result, 0, len(changes))
 	for i, ch := range changes {
-		p.emit("progress.apply.item", "index", i+1, "total", len(changes), "domain", ch.Domain, "cert", certID)
+		p.emit("progress.apply.item", "product", string(ch.Product), "index", i+1, "total", len(changes), "domain", ch.Domain, "cert", certID)
 		res := core.Result{Change: ch, OK: true}
 		if err := p.setCDNCertificate(ctx, ch.Domain, certID); err != nil {
-			p.emit("progress.apply.failed", "domain", ch.Domain, "code", Code(err))
+			p.emit("progress.apply.failed", "product", string(ch.Product), "domain", ch.Domain, "code", Code(err))
 			results = append(results, failure(ch, err))
 			continue
 		}
-		p.emit("progress.apply.verifying", "domain", ch.Domain)
+		p.emit("progress.apply.verifying", "product", string(ch.Product), "domain", ch.Domain)
 		verified, state, err := p.verifyCDN(ctx, ch.Domain, certID)
 		switch {
 		case err != nil:
@@ -499,11 +567,11 @@ func (p *Provider) applyCDNGroup(ctx context.Context, certID string, changes []c
 			res.Verified = false
 			res.MessageKey = MsgVerifyFailed
 			res.Err = fmt.Errorf("cdn domain %s did not report certificate %s (state %q)", ch.Domain, certID, state)
-			p.emit("progress.apply.unverified", "domain", ch.Domain, "state", state)
+			p.emit("progress.apply.unverified", "product", string(ch.Product), "domain", ch.Domain, "state", state)
 			results = append(results, res)
 		default:
 			res.Verified = true
-			p.emit("progress.apply.verified", "domain", ch.Domain)
+			p.emit("progress.apply.verified", "product", string(ch.Product), "domain", ch.Domain)
 			results = append(results, res)
 		}
 	}
@@ -530,16 +598,16 @@ func (p *Provider) applyTEOGroup(ctx context.Context, certID string, changes []c
 		for _, ch := range group {
 			hosts = append(hosts, ch.Domain)
 		}
-		p.emit("progress.apply.item", "index", len(results)+1, "total", len(changes), "domain", strings.Join(hosts, ", "), "cert", certID)
+		p.emit("progress.apply.item", "product", string(group[0].Product), "index", len(results)+1, "total", len(changes), "domain", strings.Join(hosts, ", "), "cert", certID)
 		if err := p.setTEOCertificate(ctx, zoneID, hosts, certID); err != nil {
 			for _, ch := range group {
-				p.emit("progress.apply.failed", "domain", ch.Domain, "code", Code(err))
+				p.emit("progress.apply.failed", "product", string(ch.Product), "domain", ch.Domain, "code", Code(err))
 				results = append(results, failure(ch, err))
 			}
 			continue
 		}
 		for _, ch := range group {
-			p.emit("progress.apply.verifying", "domain", ch.Domain)
+			p.emit("progress.apply.verifying", "product", string(ch.Product), "domain", ch.Domain)
 		}
 		// One read per poll round covers every host of the site.
 		verified, states, err := p.verifyTEOBatch(ctx, zoneID, hosts, certID)
@@ -550,7 +618,7 @@ func (p *Provider) applyTEOGroup(ctx context.Context, certID string, changes []c
 				results = append(results, failure(ch, err))
 			case !verified[key]:
 				state := states[key]
-				p.emit("progress.apply.unverified", "domain", ch.Domain, "state", state)
+				p.emit("progress.apply.unverified", "product", string(ch.Product), "domain", ch.Domain, "state", state)
 				results = append(results, core.Result{
 					Change:     ch,
 					OK:         true,
@@ -559,7 +627,7 @@ func (p *Provider) applyTEOGroup(ctx context.Context, certID string, changes []c
 					Err:        fmt.Errorf("edgeone host %s did not report mode %s with certificate %s (state %q)", ch.Domain, teoModeSSLCert, certID, state),
 				})
 			default:
-				p.emit("progress.apply.verified", "domain", ch.Domain)
+				p.emit("progress.apply.verified", "product", string(ch.Product), "domain", ch.Domain)
 				results = append(results, core.Result{Change: ch, OK: true, Verified: true})
 			}
 		}
@@ -590,7 +658,7 @@ func (p *Provider) applyUnified(ctx context.Context, product core.Product, certI
 		return results
 	}
 	for _, ch := range changes {
-		p.emit("progress.apply.verifying", "domain", ch.Domain)
+		p.emit("progress.apply.verifying", "product", string(ch.Product), "domain", ch.Domain)
 		verified, state, err := p.verifyProduct(ctx, ch)
 		switch {
 		case err != nil:
@@ -601,7 +669,7 @@ func (p *Provider) applyUnified(ctx context.Context, product core.Product, certI
 				Err: fmt.Errorf("resource %s did not confirm certificate %s (state %q)", ch.Domain, certID, state),
 			})
 		default:
-			p.emit("progress.apply.verified", "domain", ch.Domain)
+			p.emit("progress.apply.verified", "product", string(ch.Product), "domain", ch.Domain)
 			results = append(results, core.Result{Change: ch, OK: true, Verified: true})
 		}
 	}
@@ -627,11 +695,33 @@ func (p *Provider) verifyProduct(ctx context.Context, ch core.Change) (bool, str
 //
 // CheckBindings is forced on regardless of the caller: the API default is the
 // unsafe one, so the safe value is applied at this boundary (decision T5).
-func (p *Provider) DeleteCertificates(ctx context.Context, _ string, certIDs []string, _ cloud.DeleteOptions) ([]core.Result, error) {
+//
+// A dry run never calls the cloud: every requested certificate is reported as
+// "would be deleted" (OK, Verified=false, cloud.MsgDryRun).
+func (p *Provider) DeleteCertificates(ctx context.Context, _ string, certIDs []string, opts cloud.DeleteOptions) ([]core.Result, error) {
 	if len(certIDs) == 0 {
 		return nil, nil
 	}
+	if opts.DryRun {
+		return dryRunDeleteResults(certIDs), nil
+	}
 	return p.deleteCertificates(ctx, certIDs, deleteOptions{CheckBindings: true})
+}
+
+// dryRunDeleteResults reports what a real delete would attempt, without the
+// cloud call. Verified stays false: nothing was confirmed because nothing was
+// written.
+func dryRunDeleteResults(certIDs []string) []core.Result {
+	out := make([]core.Result, 0, len(certIDs))
+	for _, id := range certIDs {
+		out = append(out, core.Result{
+			Change:     core.Change{Kind: core.KindDelete, To: &core.CertRef{ID: id}},
+			OK:         true,
+			Verified:   false,
+			MessageKey: cloud.MsgDryRun,
+		})
+	}
+	return out
 }
 
 // UploadCertificate is reserved for `orbit push` (decision A7).

@@ -6,8 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/Crequency/orbit/internal/cloud"
-	"github.com/Crequency/orbit/internal/i18n"
+	"github.com/Nimatattic/Orbit/internal/cloud"
+	"github.com/Nimatattic/Orbit/internal/i18n"
 )
 
 // Run takes over the terminal for one interactive run and restores it on exit.
@@ -20,6 +20,9 @@ func Run(ctx context.Context, bundle *i18n.Bundle, events <-chan cloud.Progress,
 
 	noColor := os.Getenv("NO_COLOR") != ""
 	model := newModel(runCtx, cancel, bundle, events, job, noColor)
+	// The provider never closes the events channel, so make sure the goroutine
+	// waiting on it is released when the program gives the terminal back.
+	defer model.stopPump()
 
 	program := tea.NewProgram(model,
 		tea.WithAltScreen(),

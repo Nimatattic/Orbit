@@ -26,6 +26,8 @@
         "dnspod:CreateRecord",
         "dnspod:ModifyRecord",
         "dnspod:ModifyRecordStatus",
+        "ssl:DeployCertificateInstance",
+        "ssl:DescribeHostDeployRecord",
         "teo:ModifyHostsCertificate"
       ],
       "resource": [

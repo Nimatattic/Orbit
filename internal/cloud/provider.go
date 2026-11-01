@@ -7,12 +7,18 @@ import (
 	"context"
 	"errors"
 
-	"github.com/Crequency/orbit/internal/core"
+	"github.com/Nimatattic/Orbit/internal/core"
 )
 
 // ErrNotImplemented is returned by providers or operations that this batch does
 // not implement yet.
 var ErrNotImplemented = errors.New("cloud: not implemented yet")
+
+// MsgDryRun is the message key attached to every result of a dry run: the
+// outcome was computed locally and nothing was written to the cloud. It lives
+// here because every provider must report a dry run in the same, recognisable
+// way (Verified stays false, OK stays true).
+const MsgDryRun = "cloud.msg.dry_run"
 
 // ScanScope narrows an enumeration.
 type ScanScope struct {
@@ -39,17 +45,22 @@ type Progress struct {
 
 // ApplyOptions configures a write run.
 type ApplyOptions struct {
-	DryRun            bool
-	ExperimentalWrite bool
-	// Concurrency bounds how many (product, certificate, strategy) groups run in
-	// parallel. Groups are independent by construction, so this is safe; within a
-	// group the product's own ordering rules apply (for example EdgeOne hosts of
-	// one site must go in a single call). Values below 1 mean 1.
+	// DryRun makes the provider compute the outcome without writing anything:
+	// every change is validated locally and reported OK with Verified=false and
+	// MsgDryRun as the message key. No cloud write API may be called.
+	DryRun bool
+	// Concurrency bounds how many certificate groups run in parallel. Groups are
+	// independent by construction, so this is safe; everything that targets one
+	// certificate is serialised (decision T7), and inside a group the product's
+	// own ordering rules apply (for example EdgeOne hosts of one site must go in
+	// a single call). Values below 1 mean 1.
 	Concurrency int
 }
 
 // DeleteOptions configures certificate deletion.
 type DeleteOptions struct {
+	// DryRun reports which certificates would be deleted without touching the
+	// cloud (Verified=false, MsgDryRun as the message key).
 	DryRun    bool
 	BackupDir string
 	// CheckBindings must always be true: SSL's DeleteCertificates defaults to
@@ -81,29 +92,6 @@ type LocalCert struct {
 	KeyPEM   []byte
 	Alias    string
 	NotAfter string
-}
-
-// ProductCapability describes what Orbit may do with one product.
-type ProductCapability struct {
-	CanEnumerate         bool
-	CanReadBoundCert     bool
-	CanApplyByCertID     bool
-	CanVerifyAfterDeploy bool
-	Granularity          string // domain
-	OwnCertField         string // cdn: Https.CertInfo.CertId; teo: Certificate.List[].CertId
-	Experimental         bool
-}
-
-// Capabilities summarises a provider.
-type Capabilities struct {
-	Products            map[core.Product]ProductCapability
-	CertGlobal          bool
-	DeployNeedsRegion   map[core.Product]bool
-	AsyncDeploy         bool
-	DeploySerialPerPair bool
-	SupportsUnbind      bool
-	VerifyAfterDeploy   bool
-	ExtraScopes         []string
 }
 
 // ScanResult is a full snapshot of one account.
@@ -159,8 +147,6 @@ type ScanWarning struct {
 type Provider interface {
 	// Name is the platform identifier, e.g. "tencent".
 	Name() string
-	// Capabilities exposes what the provider can do, for planning and UI.
-	Capabilities() Capabilities
 	// Preflight verifies credentials, roles and permissions for one account.
 	Preflight(ctx context.Context, account string) ([]core.Check, error)
 	// Scan collects certificates, resources and association evidence in one go.

@@ -158,7 +158,6 @@ const (
 	KindNoCert      ChangeKind = "nocert"
 	KindForeign     ChangeKind = "foreign"
 	KindNeedsManual ChangeKind = "needs_manual"
-	KindBlocked     ChangeKind = "blocked"
 )
 
 // Risk expresses how disruptive a change is.
@@ -182,9 +181,6 @@ const (
 	StrategyProduct Strategy = "product"
 	// StrategyDeploy uses SSL DeployCertificateInstance for both products.
 	StrategyDeploy Strategy = "deploy"
-	// StrategyReplace uses SSL UpdateCertificateInstance(old -> new). Not
-	// verified yet, therefore gated behind --enable-experimental-write.
-	StrategyReplace Strategy = "replace"
 )
 
 // CertRef is a compact certificate reference for plans and audit records.

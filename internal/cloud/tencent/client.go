@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Crequency/orbit/internal/cloud"
+	"github.com/Nimatattic/Orbit/internal/cloud"
 	cdn "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdn/v20180606"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/profile"

@@ -3,7 +3,7 @@ package cloud
 import (
 	"context"
 
-	"github.com/Crequency/orbit/internal/core"
+	"github.com/Nimatattic/Orbit/internal/core"
 )
 
 // DNSProvider is implemented by providers that can manage hosted DNS zones.

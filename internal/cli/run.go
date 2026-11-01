@@ -11,13 +11,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Crequency/orbit/internal/cloud"
-	"github.com/Crequency/orbit/internal/config"
-	"github.com/Crequency/orbit/internal/core"
-	"github.com/Crequency/orbit/internal/exitcode"
-	"github.com/Crequency/orbit/internal/i18n"
-	"github.com/Crequency/orbit/internal/render/plain"
-	"github.com/Crequency/orbit/internal/render/tui"
+	"github.com/Nimatattic/Orbit/internal/cloud"
+	"github.com/Nimatattic/Orbit/internal/config"
+	"github.com/Nimatattic/Orbit/internal/core"
+	"github.com/Nimatattic/Orbit/internal/exitcode"
+	"github.com/Nimatattic/Orbit/internal/i18n"
+	"github.com/Nimatattic/Orbit/internal/render/plain"
+	"github.com/Nimatattic/Orbit/internal/render/tui"
 )
 
 func (a *App) newStatusCmd() *cobra.Command {
@@ -43,7 +43,11 @@ func (a *App) newUpdateCmd() *cobra.Command {
 			return a.runUpdate(cmd.Context())
 		},
 	}
-	cmd.Flags().Bool("ssl", false, "apply SSL certificates")
+	// --ssl is a compatibility flag: older scripts still pass it, so it stays
+	// registered (an unknown flag would abort them) but hidden from help. It is
+	// a no-op: certificate handling is the command's job, not a flag's.
+	cmd.Flags().Bool("ssl", false, "apply SSL certificates (compatibility no-op)")
+	_ = cmd.Flags().MarkHidden("ssl")
 	cmd.Flags().StringVar(&a.Accounts, "accounts", "", "")
 	cmd.Flags().BoolVar(&a.AllAccounts, "all-accounts", false, "")
 	cmd.Flags().StringVar(&a.Platforms, "platforms", "", "")
@@ -53,7 +57,6 @@ func (a *App) newUpdateCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&a.DryRun, "dry-run", false, "")
 	cmd.Flags().BoolVar(&a.Yes, "yes", false, "")
 	cmd.Flags().BoolVar(&a.FailOnChg, "fail-on-changes", false, "")
-	cmd.Flags().BoolVar(&a.ExpWrite, "enable-experimental-write", false, "")
 	return cmd
 }
 
@@ -65,10 +68,14 @@ func (a *App) newCleanCmd() *cobra.Command {
 			return a.runClean(cmd.Context())
 		},
 	}
-	cmd.Flags().Bool("ssl", false, "clean up SSL certificates")
+	// See newUpdateCmd: --ssl stays accepted for old scripts but is hidden and
+	// does nothing.
+	cmd.Flags().Bool("ssl", false, "clean up SSL certificates (compatibility no-op)")
+	_ = cmd.Flags().MarkHidden("ssl")
 	cmd.Flags().StringVar(&a.Accounts, "accounts", "", "")
 	cmd.Flags().BoolVar(&a.AllAccounts, "all-accounts", false, "")
 	cmd.Flags().StringVar(&a.Platforms, "platforms", "", "")
+	cmd.Flags().StringVar(&a.Products, "products", "", "")
 	cmd.Flags().StringVar(&a.OlderThan, "older-than", "", "")
 	cmd.Flags().BoolVar(&a.IncludeFree, "include-free", false, "")
 	cmd.Flags().BoolVar(&a.PartialScan, "permit-partial-scan", false, "")
@@ -144,6 +151,27 @@ func (a *App) warningDTOs(warnings []cloud.ScanWarning) []warningDTO {
 		out = append(out, dto)
 	}
 	return out
+}
+
+// applyOptions is the write contract for `update`. DryRun travels with the
+// request even though the CLI short-circuits in dry-run mode: a provider must
+// never write when the caller asked it not to, and that guarantee cannot depend
+// on which caller is talking to it.
+func (a *App) applyOptions() cloud.ApplyOptions {
+	return cloud.ApplyOptions{
+		DryRun:      a.DryRun,
+		Concurrency: a.Loaded.Config.Defaults.Concurrency.Changes,
+	}
+}
+
+// deleteOptions is the write contract for `clean`. See applyOptions for why
+// DryRun is always propagated.
+func (a *App) deleteOptions(backupDir string) cloud.DeleteOptions {
+	return cloud.DeleteOptions{
+		DryRun:        a.DryRun,
+		BackupDir:     backupDir,
+		CheckBindings: true,
+	}
 }
 
 // compactWarningCodes are per-product availability failures. Printing the SDK
@@ -243,7 +271,6 @@ func (a *App) updateOptions(account string) (core.PlanOptions, error) {
 		Products:               products,
 		Domains:                splitList(a.Domains),
 		Strategy:               strategy,
-		ExperimentalWrite:      a.ExpWrite,
 		EdgeOneReplaceFreeCert: cfg.Defaults.EdgeOne.ReplaceFreeCert,
 		Match: core.MatchOptions{
 			AllowExpired: cfg.Defaults.DomainMatch.AllowExpired,
@@ -264,6 +291,11 @@ func (a *App) runUpdate(ctx context.Context) error {
 	}
 
 	failures := 0
+	// pending counts the planned writes across every account: --fail-on-changes
+	// asks "is there work to do", which is a property of the whole run, not of
+	// the last account. Summing also keeps an empty plan from reporting pending
+	// changes (the old bug turned a no-op cron run into exit 3 every week).
+	pending := 0
 	for _, account := range targets {
 		provider, err := a.providerFor(account)
 		if err != nil {
@@ -282,9 +314,10 @@ func (a *App) runUpdate(ctx context.Context) error {
 			return err
 		}
 		plan := core.BuildUpdatePlan(inputs.resources, inputs.certs, opts)
+		pending += plan.ApplyCount()
 
 		if a.JSON {
-			if err := a.jsonOut(map[string]any{"account": account, "plan": plan}); err != nil {
+			if err := a.jsonOut(updateOutput{Account: account, Plan: newPlanDTO(plan), Warnings: a.warningDTOs(inputs.warnings)}); err != nil {
 				return err
 			}
 		} else {
@@ -297,21 +330,27 @@ func (a *App) runUpdate(ctx context.Context) error {
 			}
 			continue
 		}
+		// --dry-run wins over --yes: it must never reach the write path, even
+		// when the caller also asked to execute (a cron line with both flags is
+		// still a dry run).
+		if a.DryRun {
+			if !a.JSON {
+				fmt.Fprintln(a.Out, "  "+a.Bundle.T("msg.dry_run"))
+			}
+			continue
+		}
 		if !a.Yes {
 			if !a.JSON {
 				fmt.Fprintln(a.Out, "  "+a.Bundle.T("msg.plan_only"))
 			}
 			continue
 		}
-		results, err := provider.Apply(ctx, account, plan, cloud.ApplyOptions{
-			ExperimentalWrite: a.ExpWrite,
-			Concurrency:       a.Loaded.Config.Defaults.Concurrency.Changes,
-		})
+		results, err := provider.Apply(ctx, account, plan, a.applyOptions())
 		if err != nil {
 			return a.mapProviderErr(err, provider.Name())
 		}
 		if a.JSON {
-			if err := a.jsonOut(map[string]any{"account": account, "results": results}); err != nil {
+			if err := a.jsonOut(newResultsDTO(account, results)); err != nil {
 				return err
 			}
 		} else {
@@ -325,7 +364,9 @@ func (a *App) runUpdate(ctx context.Context) error {
 	if failures > 0 {
 		return exitcode.New(exitcode.Partial, "msg.partial")
 	}
-	if a.FailOnChg && !a.Yes {
+	// --yes already wrote the changes, so there is nothing pending to report;
+	// the flag only makes sense in plan mode (decision B6).
+	if a.FailOnChg && !a.Yes && pending > 0 {
 		return exitcode.New(exitcode.PendingChanges, "msg.fail_on_changes")
 	}
 	return nil
@@ -381,14 +422,25 @@ func (a *App) runClean(ctx context.Context) error {
 		})
 
 		if a.JSON {
-			if err := a.jsonOut(map[string]any{"account": account, "clean": plan}); err != nil {
+			if err := a.jsonOut(cleanOutput{Account: account, Clean: newCleanPlanDTO(plan), Warnings: a.warningDTOs(inputs.warnings)}); err != nil {
 				return err
 			}
 		} else {
 			plain.CleanPlan(a.Out, a.Bundle, plan)
 		}
-		if len(plan.Candidates) == 0 || !a.Yes {
-			if len(plan.Candidates) > 0 && !a.Yes && !a.JSON {
+		if len(plan.Candidates) == 0 {
+			continue
+		}
+		// --dry-run wins over --yes: skipping the backup as well keeps a dry run
+		// free of side effects on the local filesystem too.
+		if a.DryRun {
+			if !a.JSON {
+				fmt.Fprintln(a.Out, "  "+a.Bundle.T("msg.dry_run"))
+			}
+			continue
+		}
+		if !a.Yes {
+			if !a.JSON {
 				fmt.Fprintln(a.Out, "  "+a.Bundle.T("msg.plan_only"))
 			}
 			continue
@@ -405,15 +457,12 @@ func (a *App) runClean(ctx context.Context) error {
 		for _, c := range plan.Candidates {
 			ids = append(ids, c.Cert.ID)
 		}
-		results, err := provider.DeleteCertificates(ctx, account, ids, cloud.DeleteOptions{
-			BackupDir:     dir,
-			CheckBindings: true,
-		})
+		results, err := provider.DeleteCertificates(ctx, account, ids, a.deleteOptions(dir))
 		if err != nil {
 			return a.mapProviderErr(err, provider.Name())
 		}
 		if a.JSON {
-			if err := a.jsonOut(map[string]any{"account": account, "results": results}); err != nil {
+			if err := a.jsonOut(newResultsDTO(account, results)); err != nil {
 				return err
 			}
 		} else {
@@ -431,6 +480,11 @@ func (a *App) runClean(ctx context.Context) error {
 // reportSummary prints the applied/unconfirmed/failed tally so a long run ends
 // with an explicit result instead of just stopping.
 func (a *App) reportSummary(results []core.Result) {
+	if a.JSON {
+		// The results document already carries every outcome; a human tally on
+		// stdout would break the machine-readable JSON stream.
+		return
+	}
 	ok, unverified, failed := 0, 0, 0
 	for _, r := range results {
 		switch {
@@ -758,10 +812,11 @@ func (a *App) doctorChecks() []core.Check {
 // wantsTUI reports whether the command should take over the terminal.
 //
 // Contract: --dry-run keeps the CLI (a plan to read), --yes keeps the CLI batch
-// mode (for cron and scripts), --no-tui forces text. Everything else on a
-// terminal is interactive.
+// mode (for cron and scripts), --fail-on-changes is a plan-mode query (its exit
+// code is the answer, so the TUI could hide it), --no-tui forces text.
+// Everything else on a terminal is interactive.
 func (a *App) wantsTUI() bool {
-	if a.DryRun || a.Yes || a.NoTUI || a.JSON {
+	if a.DryRun || a.Yes || a.FailOnChg || a.NoTUI || a.JSON {
 		return false
 	}
 	return a.Interactive
@@ -809,10 +864,7 @@ func (a *App) tuiUpdate(ctx context.Context, account string, only map[string]boo
 			return items, nil
 		},
 		Apply: func(applyCtx context.Context) ([]core.Result, error) {
-			return provider.Apply(applyCtx, account, plan, cloud.ApplyOptions{
-				ExperimentalWrite: a.ExpWrite,
-				Concurrency:       a.Loaded.Config.Defaults.Concurrency.Changes,
-			})
+			return provider.Apply(applyCtx, account, plan, a.applyOptions())
 		},
 	}
 
@@ -908,10 +960,7 @@ func (a *App) tuiClean(ctx context.Context, account string, onlyCerts map[string
 			if err := a.backupCertificates(applyCtx, dir, account, candidatePlan, provider); err != nil {
 				return nil, err
 			}
-			return provider.DeleteCertificates(applyCtx, account, candidateIDs, cloud.DeleteOptions{
-				BackupDir:     dir,
-				CheckBindings: true,
-			})
+			return provider.DeleteCertificates(applyCtx, account, candidateIDs, a.deleteOptions(dir))
 		},
 	}
 

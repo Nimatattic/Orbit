@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Crequency/orbit/internal/core"
+	"github.com/Nimatattic/Orbit/internal/core"
 )
 
 // seedDNS builds the demo zones and records used by `--demo dns`.

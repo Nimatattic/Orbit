@@ -2,3 +2,15 @@ bin/
 dist/
 *.test
 .orbit.yaml
+
+# Test and profiling artefacts: never part of a release.
+coverage.out
+coverage.html
+*.coverprofile
+*.prof
+*.pprof
+
+# Editor and OS noise.
+.DS_Store
+.idea/
+.vscode/

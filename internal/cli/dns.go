@@ -12,13 +12,13 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
-	"github.com/Crequency/orbit/internal/audit"
-	"github.com/Crequency/orbit/internal/cloud"
-	"github.com/Crequency/orbit/internal/cloud/tencent"
-	"github.com/Crequency/orbit/internal/core"
-	"github.com/Crequency/orbit/internal/exitcode"
-	"github.com/Crequency/orbit/internal/render/tui"
-	"github.com/Crequency/orbit/internal/version"
+	"github.com/Nimatattic/Orbit/internal/audit"
+	"github.com/Nimatattic/Orbit/internal/cloud"
+	"github.com/Nimatattic/Orbit/internal/cloud/tencent"
+	"github.com/Nimatattic/Orbit/internal/core"
+	"github.com/Nimatattic/Orbit/internal/exitcode"
+	"github.com/Nimatattic/Orbit/internal/render/tui"
+	"github.com/Nimatattic/Orbit/internal/version"
 )
 
 // dnsWriteFlags are the options shared by the mutating DNS commands.
@@ -231,18 +231,12 @@ func (a *App) newDNSZonesCmd() *cobra.Command {
 	}
 }
 
-// dnsZoneRow is one line of the zone listing.
-type dnsZoneRow struct {
-	Account string       `json:"account"`
-	Zone    core.DNSZone `json:"zone"`
-}
-
 func (a *App) runDNSZones(ctx context.Context) error {
 	targets, err := a.dnsTargets()
 	if err != nil {
 		return err
 	}
-	var rows []dnsZoneRow
+	rows := make([]dnsZoneRow, 0, len(targets))
 	failures := 0
 	for _, account := range targets {
 		dns, err := a.dnsProvider(account)
@@ -258,7 +252,7 @@ func (a *App) runDNSZones(ctx context.Context) error {
 			continue
 		}
 		for _, z := range zones {
-			rows = append(rows, dnsZoneRow{Account: account, Zone: z})
+			rows = append(rows, dnsZoneRow{Account: account, Zone: newZoneDTO(z)})
 		}
 	}
 
@@ -352,7 +346,7 @@ func (a *App) runDNSList(ctx context.Context, zone string) error {
 	})
 
 	if a.JSON {
-		if err := a.jsonOut(all); err != nil {
+		if err := a.jsonOut(newRecordDTOs(all)); err != nil {
 			return err
 		}
 		return a.partialFailure(failures)
@@ -442,6 +436,14 @@ func (a *App) runDNSSet(ctx context.Context, zone, name, typ, value string) erro
 	}
 	switch change.Kind {
 	case core.DNSKeep:
+		if a.JSON {
+			record := recordFromInput(in)
+			if change.Existing != nil {
+				record = *change.Existing
+			}
+			return a.jsonOut(dnsWriteDTO{Account: target, Action: "keep",
+				Records: newRecordDTOs([]core.DNSRecord{record})})
+		}
 		fmt.Fprintln(a.Out, a.Bundle.T("dns.keep", "fqdn", core.RecordFQDN(zone, in.Name), "type", in.Type))
 		return nil
 	case core.DNSCreate:
@@ -454,6 +456,10 @@ func (a *App) runDNSSet(ctx context.Context, zone, name, typ, value string) erro
 func (a *App) applyDNSCreate(ctx context.Context, dns cloud.DNSProvider, account string, in core.DNSRecordInput) error {
 	fqdn := core.RecordFQDN(in.Zone, in.Name)
 	if !a.dnsWriteAllowed() {
+		if a.JSON {
+			return a.jsonOut(dnsWriteDTO{Account: account, Action: "create",
+				Records: newRecordDTOs([]core.DNSRecord{recordFromInput(in)})})
+		}
 		fmt.Fprintln(a.Out, a.Bundle.T("dns.plan_create", "fqdn", fqdn, "type", in.Type, "value", in.Value, "ttl", in.TTL))
 		return a.dnsDryRunHint()
 	}
@@ -464,6 +470,10 @@ func (a *App) applyDNSCreate(ctx context.Context, dns cloud.DNSProvider, account
 	}
 	verified := a.verifyDNSRecord(ctx, dns, account, record)
 	a.auditDNS(account, "create", record, nil)
+	if a.JSON {
+		return a.jsonOut(dnsWriteDTO{Account: account, Action: "create", Applied: true,
+			Verified: &verified, Records: newRecordDTOs([]core.DNSRecord{record})})
+	}
 	fmt.Fprintln(a.Out, a.Bundle.T("dns.created", "fqdn", fqdn, "type", record.Type, "id", record.ID,
 		"state", dnsVerifiedLabel(verified)))
 	return nil
@@ -471,15 +481,20 @@ func (a *App) applyDNSCreate(ctx context.Context, dns cloud.DNSProvider, account
 
 func (a *App) applyDNSUpdate(ctx context.Context, dns cloud.DNSProvider, account string, existing core.DNSRecord, in core.DNSRecordInput, explicit bool) error {
 	fqdn := core.RecordFQDN(in.Zone, in.Name)
-	if !a.dnsWriteAllowed() {
-		fmt.Fprintln(a.Out, a.Bundle.T("dns.plan_update", "fqdn", fqdn, "type", in.Type,
-			"from", existing.Value, "to", in.Value))
-		return a.dnsDryRunHint()
-	}
 	desired := existing
 	desired.Name, desired.Type, desired.Value = in.Name, in.Type, in.Value
 	desired.TTL, desired.MX, desired.Line = in.TTL, in.MX, in.Line
 	desired.Remark, desired.Enabled = in.Remark, in.Enabled
+
+	if !a.dnsWriteAllowed() {
+		if a.JSON {
+			return a.jsonOut(dnsWriteDTO{Account: account, Action: "update",
+				Records: newRecordDTOs([]core.DNSRecord{desired})})
+		}
+		fmt.Fprintln(a.Out, a.Bundle.T("dns.plan_update", "fqdn", fqdn, "type", in.Type,
+			"from", existing.Value, "to", in.Value))
+		return a.dnsDryRunHint()
+	}
 
 	updated, err := dns.UpdateRecord(ctx, account, desired)
 	if err != nil {
@@ -488,6 +503,10 @@ func (a *App) applyDNSUpdate(ctx context.Context, dns cloud.DNSProvider, account
 	}
 	verified := a.verifyDNSRecord(ctx, dns, account, updated)
 	a.auditDNS(account, "update", updated, nil)
+	if a.JSON {
+		return a.jsonOut(dnsWriteDTO{Account: account, Action: "update", Applied: true,
+			Verified: &verified, Records: newRecordDTOs([]core.DNSRecord{updated})})
+	}
 	fmt.Fprintln(a.Out, a.Bundle.T("dns.updated", "fqdn", fqdn, "type", updated.Type, "id", updated.ID,
 		"state", dnsVerifiedLabel(verified)))
 	return nil
@@ -546,9 +565,12 @@ func (a *App) runDNSRemove(ctx context.Context, zone string, ids []string) error
 		}
 		victims = append(victims, record)
 	}
+	applied := a.dnsWriteAllowed()
 	for _, record := range victims {
-		if !a.dnsWriteAllowed() {
-			fmt.Fprintln(a.Out, a.Bundle.T("dns.plan_delete", "fqdn", record.FQDN(), "type", record.Type, "value", record.Value))
+		if !applied {
+			if !a.JSON {
+				fmt.Fprintln(a.Out, a.Bundle.T("dns.plan_delete", "fqdn", record.FQDN(), "type", record.Type, "value", record.Value))
+			}
 			continue
 		}
 		if err := dns.DeleteRecord(ctx, target, zone, record.ID); err != nil {
@@ -556,9 +578,15 @@ func (a *App) runDNSRemove(ctx context.Context, zone string, ids []string) error
 			return a.mapProviderErr(err, "tencent")
 		}
 		a.auditDNS(target, "delete", record, nil)
-		fmt.Fprintln(a.Out, a.Bundle.T("dns.deleted", "fqdn", record.FQDN(), "type", record.Type, "id", record.ID))
+		if !a.JSON {
+			fmt.Fprintln(a.Out, a.Bundle.T("dns.deleted", "fqdn", record.FQDN(), "type", record.Type, "id", record.ID))
+		}
 	}
-	if !a.dnsWriteAllowed() {
+	if a.JSON {
+		return a.jsonOut(dnsWriteDTO{Account: target, Action: "delete", Applied: applied,
+			Records: newRecordDTOs(victims)})
+	}
+	if !applied {
 		return a.dnsDryRunHint()
 	}
 	return nil
@@ -597,6 +625,8 @@ func (a *App) runDNSToggle(ctx context.Context, zone string, ids []string, enabl
 	if enable {
 		op = "enable"
 	}
+	applied := a.dnsWriteAllowed()
+	affected := make([]core.DNSRecord, 0, len(ids))
 	for _, raw := range ids {
 		id, parseErr := parseUint(raw)
 		if parseErr != nil {
@@ -606,19 +636,28 @@ func (a *App) runDNSToggle(ctx context.Context, zone string, ids []string, enabl
 		if !ok {
 			return exitcode.New(exitcode.Fatal, "dns.record_missing", "id", id, "zone", zone)
 		}
-		if !a.dnsWriteAllowed() {
-			fmt.Fprintln(a.Out, a.Bundle.T("dns.plan_toggle", "op", op, "fqdn", record.FQDN(), "type", record.Type))
+		record.Enabled = enable // the requested state, and the state after a write
+		affected = append(affected, record)
+		if !applied {
+			if !a.JSON {
+				fmt.Fprintln(a.Out, a.Bundle.T("dns.plan_toggle", "op", op, "fqdn", record.FQDN(), "type", record.Type))
+			}
 			continue
 		}
 		if err := dns.SetRecordEnabled(ctx, target, zone, id, enable); err != nil {
 			a.auditDNS(target, op, record, err)
 			return a.mapProviderErr(err, "tencent")
 		}
-		record.Enabled = enable
 		a.auditDNS(target, op, record, nil)
-		fmt.Fprintln(a.Out, a.Bundle.T("dns.toggled", "op", op, "fqdn", record.FQDN(), "type", record.Type, "id", id))
+		if !a.JSON {
+			fmt.Fprintln(a.Out, a.Bundle.T("dns.toggled", "op", op, "fqdn", record.FQDN(), "type", record.Type, "id", id))
+		}
 	}
-	if !a.dnsWriteAllowed() {
+	if a.JSON {
+		return a.jsonOut(dnsWriteDTO{Account: target, Action: op, Applied: applied,
+			Records: newRecordDTOs(affected)})
+	}
+	if !applied {
 		return a.dnsDryRunHint()
 	}
 	return nil
@@ -668,7 +707,13 @@ func (a *App) runDNSCheck(ctx context.Context, zone, name, typ string) error {
 
 	answers, err := resolveValues(lookupCtx, resolver, fqdn, typ)
 	if err != nil {
-		fmt.Fprintln(a.Out, a.Bundle.T("dns.check_lookup_failed", "fqdn", fqdn, "error", err.Error()))
+		// Under --json the lookup failure is diagnostic: it belongs on stderr so
+		// stdout stays a single parseable document.
+		w := a.Out
+		if a.JSON {
+			w = a.Err
+		}
+		fmt.Fprintln(w, a.Bundle.T("dns.check_lookup_failed", "fqdn", fqdn, "error", err.Error()))
 	}
 
 	var missing []string
@@ -678,20 +723,26 @@ func (a *App) runDNSCheck(ctx context.Context, zone, name, typ string) error {
 		}
 	}
 	if a.JSON {
-		return a.jsonOut(map[string]any{
-			"zone": zone, "fqdn": fqdn, "type": typ,
-			"configured": valuesOf(wanted), "answers": answers, "missing": missing,
-		})
+		if err := a.jsonOut(newDNSCheckDTO(zone, fqdn, typ, valuesOf(wanted), answers, missing)); err != nil {
+			return err
+		}
+	} else {
+		fmt.Fprintf(a.Out, "%s %s\n", a.Bundle.T("dns.check_configured"), strings.Join(valuesOf(wanted), ", "))
+		if len(answers) > 0 {
+			fmt.Fprintf(a.Out, "%s %s\n", a.Bundle.T("dns.check_answers"), strings.Join(answers, ", "))
+		}
 	}
-	fmt.Fprintf(a.Out, "%s %s\n", a.Bundle.T("dns.check_configured"), strings.Join(valuesOf(wanted), ", "))
-	if len(answers) > 0 {
-		fmt.Fprintf(a.Out, "%s %s\n", a.Bundle.T("dns.check_answers"), strings.Join(answers, ", "))
-	}
+	// The verdict is the exit code in both modes: --json must not swallow the
+	// "not propagated yet" signal the text mode reports.
 	if len(missing) == 0 {
-		fmt.Fprintln(a.Out, a.Bundle.T("dns.check_ok", "fqdn", fqdn))
+		if !a.JSON {
+			fmt.Fprintln(a.Out, a.Bundle.T("dns.check_ok", "fqdn", fqdn))
+		}
 		return nil
 	}
-	fmt.Fprintln(a.Out, a.Bundle.T("dns.check_missing", "fqdn", fqdn, "values", strings.Join(missing, ", ")))
+	if !a.JSON {
+		fmt.Fprintln(a.Out, a.Bundle.T("dns.check_missing", "fqdn", fqdn, "values", strings.Join(missing, ", ")))
+	}
 	return exitcode.New(exitcode.PendingChanges, "dns.check_pending", "fqdn", fqdn)
 }
 

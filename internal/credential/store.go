@@ -15,7 +15,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/Crequency/orbit/internal/config"
+	"github.com/Nimatattic/Orbit/internal/config"
 )
 
 // Account is one stored key pair.

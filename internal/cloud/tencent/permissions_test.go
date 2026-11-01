@@ -30,6 +30,9 @@ func TestPermissionTableCoversEverySDKCall(t *testing.T) {
 		{"cdn", (*cdnAPI)(nil)},
 		{"teo", (*teoAPI)(nil)},
 		{"sts", (*stsAPI)(nil)},
+		// DNS must be guarded too: a new DNSPod call would otherwise slip past
+		// the "every SDK call is documented" rule.
+		{"dnspod", (*dnspodAPI)(nil)},
 	}
 	for _, tc := range cases {
 		typ := reflect.TypeOf(tc.iface).Elem()
@@ -48,9 +51,6 @@ func TestSelectPermissionsFiltersByTierAndScope(t *testing.T) {
 	for _, p := range readOnly {
 		if p.Tier != TierRead {
 			t.Fatalf("read-only selection leaked %s (%s)", p.Action, p.Tier)
-		}
-		if p.Experimental {
-			t.Fatalf("experimental action %s must be opt-in", p.Action)
 		}
 	}
 	contains := func(list []Permission, action string) bool {
@@ -71,8 +71,9 @@ func TestSelectPermissionsFiltersByTierAndScope(t *testing.T) {
 		t.Fatal("read-only must not include deletion")
 	}
 
-	// Dropping EdgeOne removes its actions but keeps SSL and CDN.
-	noTEO := SelectPermissions(PermissionFilter{Scopes: []string{ScopeSSL, ScopeCDN}})
+	// Dropping EdgeOne removes its actions but keeps SSL and CDN. The tier is
+	// explicit: an empty MaxTier means "no authority" (see the test below).
+	noTEO := SelectPermissions(PermissionFilter{Scopes: []string{ScopeSSL, ScopeCDN}, MaxTier: TierDelete})
 	for _, p := range noTEO {
 		if len(p.Scopes) == 1 && p.Scopes[0] == ScopeTEO {
 			t.Fatalf("EdgeOne action %s must be gone", p.Action)
@@ -85,19 +86,18 @@ func TestSelectPermissionsFiltersByTierAndScope(t *testing.T) {
 		t.Fatal("teo:DescribeZones must be gone when EdgeOne is out of scope")
 	}
 
-	// Full scope includes deletion and stays free of experimental actions.
+	// Full scope includes deletion, and no action carries the experimental mark
+	// any more (see TestExperimentalOptInIsANoop).
 	full := SelectPermissions(PermissionFilter{MaxTier: TierDelete})
 	if !contains(full, "ssl:DeleteCertificates") {
 		t.Fatal("full scope needs the delete action")
 	}
-	for _, p := range full {
-		if p.Experimental {
-			t.Fatalf("experimental action %s must not be in the default set", p.Action)
+	// The unified deploy path is first-class: its actions are in the normal set
+	// and need no opt-in flag.
+	for _, action := range []string{"ssl:DeployCertificateInstance", "ssl:DescribeHostDeployRecord"} {
+		if !contains(full, action) {
+			t.Fatalf("%s must be granted without an experimental opt-in", action)
 		}
-	}
-	withExperimental := SelectPermissions(PermissionFilter{MaxTier: TierDelete, IncludeExperimental: true})
-	if !contains(withExperimental, "ssl:DeployCertificateInstance") {
-		t.Fatal("the deploy strategy actions should appear when opted in")
 	}
 
 	// Results are stable and ordered by tier.
@@ -107,6 +107,28 @@ func TestSelectPermissionsFiltersByTierAndScope(t *testing.T) {
 			t.Fatalf("permissions must be ordered by tier, got %s after level %d", p.Action, last)
 		} else {
 			last = lvl
+		}
+	}
+}
+
+// TestExperimentalOptInIsANoop pins the post-cleanup contract: the unified
+// deploy actions are ordinary actions now, so IncludeExperimental changes
+// nothing. The field and the filter stay for future gated actions, but no
+// action may silently be marked experimental again without a test decision.
+func TestExperimentalOptInIsANoop(t *testing.T) {
+	without := SelectPermissions(PermissionFilter{MaxTier: TierDelete})
+	withOptIn := SelectPermissions(PermissionFilter{MaxTier: TierDelete, IncludeExperimental: true})
+	if len(without) != len(withOptIn) {
+		t.Fatalf("IncludeExperimental must not change the set: %d vs %d actions", len(without), len(withOptIn))
+	}
+	for i := range without {
+		if without[i].Action != withOptIn[i].Action {
+			t.Fatalf("IncludeExperimental changed the set: %s vs %s", without[i].Action, withOptIn[i].Action)
+		}
+	}
+	for _, p := range Permissions() {
+		if p.Experimental {
+			t.Fatalf("%s is still marked experimental; the unified deploy path is first-class", p.Action)
 		}
 	}
 }
@@ -187,6 +209,37 @@ func TestPolicyDocumentFollowsTheOfficialGrammar(t *testing.T) {
 	}
 	if !strings.HasSuffix(text, "\n") {
 		t.Fatal("the text should end with a newline so it pastes cleanly")
+	}
+}
+
+// TestEmptyMaxTierGrantsNothing pins the shared rule between SelectPermissions
+// and PolicyNameSuggestion: the zero-value filter must not grant every action
+// (the old fallback treated "" as TierDelete) while the name claimed
+// "orbit-readonly". No tier now means no authority and no name.
+func TestEmptyMaxTierGrantsNothing(t *testing.T) {
+	empty := PermissionFilter{}
+	if got := SelectPermissions(empty); len(got) != 0 {
+		t.Fatalf("an empty filter must grant nothing, got %d action(s), first %s", len(got), got[0].Action)
+	}
+	if got := PolicyPermissions(empty); len(got) != 0 {
+		t.Fatalf("an empty filter must put nothing in a policy, got %d action(s)", len(got))
+	}
+	if got := PolicyDocument(empty); len(got.Statement) != 0 {
+		t.Fatalf("an empty filter must not produce statements, got %#v", got.Statement)
+	}
+	if got := PolicyNameSuggestion(empty); got != "" {
+		t.Fatalf("no tier means no policy name, got %q", got)
+	}
+
+	// Scopes without a tier are equally empty: scope alone is not authority.
+	scoped := PermissionFilter{Scopes: []string{ScopeSSL, ScopeCDN, ScopeTEO}}
+	if got := SelectPermissions(scoped); len(got) != 0 {
+		t.Fatalf("a scope without a tier must grant nothing, got %d action(s)", len(got))
+	}
+
+	// An explicit tier still behaves as before.
+	if got := PolicyNameSuggestion(PermissionFilter{MaxTier: TierRead}); got != "orbit-readonly" {
+		t.Fatalf("read-only name = %q, want orbit-readonly", got)
 	}
 }
 
@@ -283,7 +336,7 @@ func TestPermissionTableEntriesAreComplete(t *testing.T) {
 // TestNoGrantActionsStayOutOfPolicies guards the exact failure an operator hit:
 // the console rejected the whole document because it contained sts:GetCallerIdentity.
 func TestNoGrantActionsStayOutOfPolicies(t *testing.T) {
-	full := PermissionFilter{MaxTier: TierDelete, IncludeExperimental: true}
+	full := PermissionFilter{MaxTier: TierDelete}
 	for _, p := range SelectPermissions(full) {
 		if p.NoGrant && !strings.HasPrefix(p.Action, "sts:") {
 			t.Fatalf("%s is marked no-grant; is that intended?", p.Action)

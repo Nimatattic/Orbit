@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Crequency/orbit/internal/core"
+	"github.com/Nimatattic/Orbit/internal/core"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 	dnspod "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/dnspod/v20210323"
 )

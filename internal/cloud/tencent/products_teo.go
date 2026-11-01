@@ -8,8 +8,8 @@ import (
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 	teo "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/teo/v20220901"
 
-	"github.com/Crequency/orbit/internal/cloud"
-	"github.com/Crequency/orbit/internal/core"
+	"github.com/Nimatattic/Orbit/internal/cloud"
+	"github.com/Nimatattic/Orbit/internal/core"
 )
 
 // teoModeSSLCert is the EdgeOne certificate mode that binds a certificate from

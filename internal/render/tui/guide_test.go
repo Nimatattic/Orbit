@@ -9,7 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/Crequency/orbit/internal/i18n"
+	"github.com/Nimatattic/Orbit/internal/i18n"
 )
 
 func testGuideJob() GuideJob {
@@ -28,7 +28,7 @@ func testGuideJob() GuideJob {
 			{ID: "apply", Label: "apply"},
 			{ID: "full", Label: "full"},
 		},
-		Permissions: func(products []string, scope string, experimental bool) []GuidePermission {
+		Permissions: func(products []string, scope string) []GuidePermission {
 			// A miniature stand-in for the real table: the certificate inventory
 			// is always there, the products add their own actions, and the scope
 			// controls write/delete.
@@ -187,7 +187,7 @@ func TestGuideReadScopeHidesRoleNote(t *testing.T) {
 func TestGuideListViewScrolls(t *testing.T) {
 	bundle, _ := i18n.New("en-US")
 	job := testGuideJob()
-	job.Permissions = func([]string, string, bool) []GuidePermission {
+	job.Permissions = func([]string, string) []GuidePermission {
 		out := make([]GuidePermission, 40)
 		for i := range out {
 			out[i] = GuidePermission{Action: "x:Action", Tier: "read", Purpose: "p"}
@@ -231,9 +231,52 @@ func TestGuideViewRendersAllSections(t *testing.T) {
 	}
 }
 
+// TestGuideListsDeployActionsByDefault pins the post-cleanup contract: the unified
+// deploy path is a first-class strategy, so its permission belongs to the table the
+// operator sees without flipping anything.
+func TestGuideListsDeployActionsByDefault(t *testing.T) {
+	job := testGuideJob()
+	var gotProducts []string
+	var gotScope string
+	job.Permissions = func(products []string, scope string) []GuidePermission {
+		gotProducts, gotScope = products, scope
+		return []GuidePermission{
+			{Action: "ssl:DescribeCertificates", Tier: "read", Purpose: "inventory"},
+			{Action: "ssl:DeployCertificateInstance", Tier: "write", Purpose: "unified deploy"},
+		}
+	}
+	job.PolicyJSON = func(_ []string, _ string) string {
+		return "{\"statement\": [\"ssl:DeployCertificateInstance\"]}"
+	}
+	bundle, _ := i18n.New("en-US")
+
+	m := newGuideModel(bundle, job, true)
+	m.width, m.height = 120, 34
+
+	// The deploy action is in the default table, with nothing to opt into.
+	out := m.View()
+	if !strings.Contains(out, "ssl:DeployCertificateInstance") {
+		t.Fatalf("the deploy action must be listed by default:\n%s", out)
+	}
+	// Nothing is filtered out of the table the caller returned.
+	if got := len(m.permissions()); got != 2 {
+		t.Fatalf("the guide must show every permission the caller returns, got %d", got)
+	}
+	if gotScope != "read" {
+		t.Fatalf("the guide must pass the selected scope, got %q", gotScope)
+	}
+	if len(gotProducts) == 0 {
+		t.Fatal("the guide must pass the enabled products")
+	}
+	// The policy JSON is built from the same selection, with no flag either.
+	if txt := m.policyText(); !strings.Contains(txt, "ssl:DeployCertificateInstance") {
+		t.Fatalf("the policy JSON must contain the deploy action, got %q", txt)
+	}
+}
+
 func TestGuidePolicyPanelTogglesAndShowsJSON(t *testing.T) {
 	job := testGuideJob()
-	job.PolicyJSON = func([]string, string, bool) string {
+	job.PolicyJSON = func([]string, string) string {
 		return "{\n  \"version\": \"2.0\",\n  \"statement\": []\n}\n"
 	}
 	job.PolicyName = func([]string, string) string { return "orbit-readonly" }
@@ -287,7 +330,7 @@ func TestGuidePolicyPanelScrollsAndWraps(t *testing.T) {
 		long.WriteString("  \"ssl:DescribeCertificateBindResourceTaskResultWithALongName\",\n")
 	}
 	job := testGuideJob()
-	job.PolicyJSON = func([]string, string, bool) string { return long.String() }
+	job.PolicyJSON = func([]string, string) string { return long.String() }
 
 	bundle, _ := i18n.New("en-US")
 	m := newGuideModel(bundle, job, true)
@@ -340,7 +383,7 @@ func TestGuideInitialSelectionFromFlags(t *testing.T) {
 func TestGuideSavePromptWritesThePolicy(t *testing.T) {
 	dir := t.TempDir()
 	job := testGuideJob()
-	job.PolicyJSON = func([]string, string, bool) string { return "{\n  \"version\": \"2.0\"\n}\n" }
+	job.PolicyJSON = func([]string, string) string { return "{\n  \"version\": \"2.0\"\n}\n" }
 	job.SaveDefault = "./orbit-account-policy.json"
 
 	bundle, _ := i18n.New("en-US")
@@ -391,7 +434,7 @@ func TestGuideSavePromptWritesThePolicy(t *testing.T) {
 func TestGuideSavePathDirectoryAndTilde(t *testing.T) {
 	dir := t.TempDir()
 	job := testGuideJob()
-	job.PolicyJSON = func([]string, string, bool) string { return "{}" }
+	job.PolicyJSON = func([]string, string) string { return "{}" }
 
 	bundle, _ := i18n.New("en-US")
 	m := newGuideModel(bundle, job, true)
@@ -437,7 +480,7 @@ func TestGuideSavePathDirectoryAndTilde(t *testing.T) {
 
 func TestGuideSavePromptCancelsAndKeepsErrors(t *testing.T) {
 	job := testGuideJob()
-	job.PolicyJSON = func([]string, string, bool) string { return "{}" }
+	job.PolicyJSON = func([]string, string) string { return "{}" }
 
 	bundle, _ := i18n.New("en-US")
 	m := newGuideModel(bundle, job, true)

@@ -15,11 +15,19 @@ Accepted by every command:
 | `--config <path>` | Use this configuration file |
 | `--local` / `--global` | Read the project `.orbit.yaml` / the global file, and make `config` writes target it |
 | `--lang <zh-CN\|en-US>` | Output language |
-| `--json` | Structured output on stdout |
+| `--json` | Machine-readable JSON on stdout — only on the commands listed below |
 | `--demo` | Offline fixture provider (no cloud access) |
 | `--no-tui` | Force text output even on a terminal |
 | `--progress` / `--no-progress` | Force / suppress progress lines on stderr |
 | `--no-cache` | Ignore the cloud association cache |
+
+`--json` is honoured by: `status`, `update`, `clean`, `account list`,
+`account test`, `account guide`, and every `dns` subcommand (`zones`, `ls`, `check`,
+`set`, `rm`, `enable`, `disable`). The flag is still accepted everywhere — it is a
+persistent flag — but it is ignored by `version`, `doctor`, `about`, `config show`,
+`config path` and `completion` (they keep their human output), and `dash` stays the
+interactive console (it fails outside a TTY) whatever `--json` says. The list above is
+the authoritative one; `--help` cannot express the difference.
 
 Account and product targeting is **per command** (`--accounts`, `--all-accounts`,
 `--platforms`, `--products`); see [accounts.md](accounts.md).
@@ -55,20 +63,26 @@ Match certificates to domains and apply them.
 
 | Flag | Meaning |
 | --- | --- |
-| `--ssl` | Apply SSL certificates (required today) |
-| `--dry-run` | Plan only |
+| `--ssl` | Accepted for compatibility, hidden from `--help`, **no effect** — omit it |
+| `--dry-run` | Plan only; wins over `--yes` |
 | `--yes` | Write without prompting |
 | `--domains a.example.com,b.example.com` | Limit to these domains |
-| `--strategy auto\|product\|deploy` | `product` uses each product's own API; `deploy` uses the unified SSL deploy API |
-| `--enable-experimental-write` | Allow the `deploy` strategy |
-| `--fail-on-changes` | Exit `3` when the plan is not empty |
+| `--strategy auto\|product\|deploy` | `auto`/`product` use each product's own API; `deploy` uses the unified SSL deploy API. All three are supported with no extra switch; `replace` is gone and fails with `Unknown strategy` |
+| `--fail-on-changes` | Plan-mode query: exit `3` only when writes are pending and `--yes` was not given |
 | `--accounts`, `--all-accounts`, `--platforms`, `--products` | Targeting |
 
 ```bash
-orbit update --ssl --dry-run
-orbit update --ssl --accounts=main --domains=www.example.com --yes
-orbit update --ssl --all-accounts --yes --json --no-progress
+orbit update --dry-run
+orbit update --accounts=main --domains=www.example.com --yes
+orbit update --all-accounts --yes --json --no-progress
 ```
+
+`--json` prints one document per account, `{account, plan, warnings?}`; with `--yes` a
+second document `{account, results}` follows each plan. Every key is snake_case
+(`plan.changes[].kind`, `to.cert_id`, `results[].verified`, …) and stdout carries nothing
+but JSON — progress, warnings and the "done" summary go to stderr, and the exit code is the
+verdict. `warnings` is omitted when the scan was complete — see
+[modes.md](modes.md#json-output).
 
 Semantics (matching, verification, idempotency): [certificates.md](certificates.md).
 
@@ -79,20 +93,24 @@ complete, and a backup is written before every delete.
 
 | Flag | Meaning |
 | --- | --- |
-| `--ssl` | Clean up SSL certificates |
-| `--older-than 7d` | Grace period |
+| `--ssl` | Accepted for compatibility, hidden from `--help`, **no effect** — omit it |
+| `--older-than 7d` | Grace period (gate G4); `0` disables the age check |
 | `--dry-run` / `--yes` | Plan / execute |
+| `--products a,b` | Narrow the scan, validated like `update`/`status` (bad value exits `1`) |
 | `--include-free` | Also consider free certificates |
 | `--permit-partial-scan` | Clean even with incomplete evidence (**dangerous**) |
 | `--backup-dir <path>` | Where to write the backup |
 | `--accounts`, `--all-accounts`, `--platforms` | Targeting |
 
 ```bash
-orbit clean --ssl --dry-run
-orbit clean --ssl --yes --older-than=7d --accounts=main
+orbit clean --dry-run
+orbit clean --yes --older-than=7d --accounts=main
+orbit clean --products=cdn --all-accounts --dry-run
 ```
 
-Gate details: [certificates.md](certificates.md#cleanup-gates).
+`--json` prints `{account, clean, warnings?}` per account, followed by
+`{account, results}` when it deletes. Gate details:
+[certificates.md](certificates.md#cleanup-gates).
 
 ## `orbit dash`
 
@@ -120,18 +138,23 @@ rules and multi-account behaviour: [dns.md](dns.md).
 | `add --alias main` | Register and store credentials (no echo, `0600`) |
 | `add --alias main --from-stdin` | Non-interactive: two lines on stdin |
 | `add --alias main --force` | Overwrite an existing alias |
-| `list` | Registered accounts |
+| `list` | Registered accounts; `--json` emits an array of `{account, secret_id, source}`, `[]` when empty |
 | `remove --alias main` | Forget an account |
-| `test --accounts=main` | Per-product probes + credential identity |
+| `test --accounts=main` | Per-product probes + credential identity; `--json` emits `{account, checks:[…]}` with untranslated `message_key` |
 | `guide` | Permission list and policy document |
+
+There is **no `--secret-id-env` flag**: `account add` reads the pair interactively, from
+stdin (`--from-stdin`), or overwrites an alias with `--force`. Environment variables are a
+*config* choice (`credential.source: env`), not a flag.
 
 Details: [accounts.md](accounts.md), [permissions.md](permissions.md).
 
 ## `orbit doctor`
 
-Self-check of configuration, credentials, permissions, locales. Exit `0` when healthy,
-`1` when something needs fixing; each line is `ok`, `warn` or `fail`. Warnings are
-acceptable (for example the service role before the first write).
+Self-check of configuration, credentials, permissions, locales. Every line is `ok`,
+`warn` or `fail`: any `fail` makes the command exit `1`, while `warn` lines still exit
+`0` (for example the service role before the first write, or a config file that does not
+exist yet). The full check list is always printed before the exit code is decided.
 
 ## `orbit config`
 

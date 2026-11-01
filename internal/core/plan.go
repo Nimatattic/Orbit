@@ -13,7 +13,6 @@ const (
 	ReasonCurrentExpired  = "core.reason.current_cert_expired"
 	ReasonNoCert          = "core.reason.no_cert"
 	ReasonEdgeOneFreeKept = "core.reason.edgeone_free_cert_kept"
-	ReasonExperimental    = "core.reason.experimental_blocked"
 )
 
 // PlanOptions configures BuildUpdatePlan.
@@ -29,22 +28,23 @@ type PlanOptions struct {
 	// EdgeOneReplaceFreeCert controls whether EdgeOne domains currently using a
 	// free certificate are switched to the best pool certificate (decision B2b).
 	EdgeOneReplaceFreeCert bool
-	// ExperimentalWrite allows otherwise gated strategies.
-	ExperimentalWrite bool
-	// Strategy is auto|deploy|product|replace; empty means auto.
+	// Strategy is auto|deploy|product; empty means auto. These are the only
+	// supported strategies; any other value falls back to the product strategy.
 	Strategy string
 }
 
 // ChooseStrategy maps the configured strategy plus the product to a concrete
 // execution path (plan §2.2).
+//
+// Only product and deploy exist. Anything else -- including the retired
+// "replace" value -- falls through to auto, i.e. the product strategy, which is
+// the safest path and the one that always has an implementation.
 func ChooseStrategy(configured string, _ Product) Strategy {
 	switch strings.ToLower(strings.TrimSpace(configured)) {
 	case "deploy":
 		return StrategyDeploy
 	case "product":
 		return StrategyProduct
-	case "replace":
-		return StrategyReplace
 	default:
 		// auto: use each product's native API, which is the most expressive and
 		// the only path that can set EdgeOne's Mode explicitly.
@@ -128,12 +128,6 @@ func BuildUpdatePlan(resources []Resource, certs []Certificate, opts PlanOptions
 		}
 
 		change.Strategy = ChooseStrategy(opts.Strategy, res.Product)
-		if change.Strategy == StrategyReplace && !opts.ExperimentalWrite {
-			change.Kind = KindBlocked
-			change.Reasons = []string{ReasonExperimental}
-			plan.Changes = append(plan.Changes, change)
-			continue
-		}
 
 		change.Kind = KindApply
 		change.Risk = riskFor(res, now)

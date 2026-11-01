@@ -58,8 +58,10 @@ type Permission struct {
 	Scopes []string
 	// PurposeKey is the i18n key explaining what Orbit does with it.
 	PurposeKey string
-	// Experimental marks actions only used by the experimental unified deploy
-	// strategy (--strategy=deploy); they are listed separately.
+	// Experimental marks an action as optional, exposed only when the caller
+	// opts in. No action is marked experimental today: the unified deploy path
+	// is a first-class strategy. The field and PermissionFilter.IncludeExperimental
+	// are kept for future gated actions.
 	Experimental bool
 	// NoGrant marks an API Orbit calls that needs no CAM authorization. Such an
 	// action must never appear in the generated policy: the console rejects an
@@ -169,14 +171,16 @@ var permissions = []Permission{
 		PurposeKey: "perm.dns.delete", Source: SourceDNS,
 	},
 
-	// --- optional: experimental unified deploy strategy ---------------------
+	// --- unified deploy strategy (--strategy=deploy) ------------------------
+	// A first-class execution path: both actions are part of the normal set and
+	// need no opt-in flag.
 	{
 		Action: "ssl:DeployCertificateInstance", Tier: TierWrite, Scopes: []string{ScopeSSL},
-		PurposeKey: "perm.ssl.deploy", Source: SourceSSL, Experimental: true,
+		PurposeKey: "perm.ssl.deploy", Source: SourceSSL,
 	},
 	{
 		Action: "ssl:DescribeHostDeployRecord", Tier: TierWrite, Scopes: []string{ScopeSSL},
-		PurposeKey: "perm.ssl.deploy_record", Source: SourceSSL, Experimental: true,
+		PurposeKey: "perm.ssl.deploy_record", Source: SourceSSL,
 	},
 }
 
@@ -191,9 +195,13 @@ func Permissions() []Permission {
 type PermissionFilter struct {
 	// Scopes selected by the operator. Empty means "all scopes".
 	Scopes []string
-	// MaxTier is the highest authority the operator wants.
+	// MaxTier is the highest authority the operator wants. An empty value
+	// means "no authority": the filter then selects nothing, and callers that
+	// want every action must name TierDelete explicitly.
 	MaxTier PermissionTier
-	// IncludeExperimental adds the experimental deploy actions.
+	// IncludeExperimental adds actions marked Experimental. Nothing carries
+	// that mark today, so this currently changes nothing; it is kept for future
+	// gated actions.
 	IncludeExperimental bool
 }
 
@@ -212,15 +220,18 @@ func TierLevel(t PermissionTier) int {
 
 // SelectPermissions returns the actions an operator with this scope needs,
 // sorted by tier then action name.
+//
+// An empty MaxTier selects no authority at all: TierLevel("") is 0, so nothing
+// is above it and the result is empty. That is deliberate (the zero-value
+// filter must never silently grant write or delete authority) and it matches
+// PolicyNameSuggestion, which returns no name in that case. Callers that want
+// everything must say TierDelete explicitly.
 func SelectPermissions(f PermissionFilter) []Permission {
 	scopes := map[string]bool{}
 	for _, s := range f.Scopes {
 		scopes[s] = true
 	}
 	maxTier := f.MaxTier
-	if maxTier == "" {
-		maxTier = TierDelete
-	}
 
 	var out []Permission
 	for _, p := range permissions {
@@ -327,13 +338,19 @@ func PolicyJSON(f PermissionFilter) (string, error) {
 }
 
 // PolicyNameSuggestion is a starting name for the policy in the console.
+//
+// It follows the same rule as SelectPermissions: a filter with no tier selects
+// nothing, so there is no policy to name and the honest answer is "". Returning
+// "orbit-readonly" there would describe a policy that was never generated.
 func PolicyNameSuggestion(f PermissionFilter) string {
 	switch f.MaxTier {
+	case TierRead:
+		return "orbit-readonly"
 	case TierWrite:
 		return "orbit-apply"
 	case TierDelete:
 		return "orbit-full"
 	default:
-		return "orbit-readonly"
+		return ""
 	}
 }

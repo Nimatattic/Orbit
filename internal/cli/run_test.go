@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Crequency/orbit/internal/cloud"
-	"github.com/Crequency/orbit/internal/config"
-	"github.com/Crequency/orbit/internal/core"
-	"github.com/Crequency/orbit/internal/credential"
-	"github.com/Crequency/orbit/internal/exitcode"
-	"github.com/Crequency/orbit/internal/i18n"
+	"github.com/Nimatattic/Orbit/internal/cloud"
+	"github.com/Nimatattic/Orbit/internal/config"
+	"github.com/Nimatattic/Orbit/internal/core"
+	"github.com/Nimatattic/Orbit/internal/credential"
+	"github.com/Nimatattic/Orbit/internal/exitcode"
+	"github.com/Nimatattic/Orbit/internal/i18n"
 )
 
 // stubProvider lets the CLI be exercised without configuration files, real
@@ -105,8 +105,7 @@ func (s *stubProvider) CertificateMaterial(context.Context, string, string) (clo
 	return s.material, s.materialErr
 }
 
-func (s *stubProvider) Name() string                     { return "tencent" }
-func (s *stubProvider) Capabilities() cloud.Capabilities { return cloud.Capabilities{} }
+func (s *stubProvider) Name() string { return "tencent" }
 func (s *stubProvider) Preflight(context.Context, string) ([]core.Check, error) {
 	return nil, nil
 }

@@ -9,9 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Crequency/orbit/internal/cloud/tencent"
-	"github.com/Crequency/orbit/internal/exitcode"
-	"github.com/Crequency/orbit/internal/render/tui"
+	"github.com/Nimatattic/Orbit/internal/cloud/tencent"
+	"github.com/Nimatattic/Orbit/internal/exitcode"
+	"github.com/Nimatattic/Orbit/internal/render/tui"
 )
 
 // guideScopes are the usage levels the guide offers, least authority first. The
@@ -92,31 +92,32 @@ func (a *App) guideJob() tui.GuideJob {
 		},
 		Products: products,
 		Scopes:   scopes,
-		Permissions: func(productIDs []string, scopeID string, experimental bool) []tui.GuidePermission {
-			items := a.selectedPermissions(productIDs, scopeID, experimental)
+		// The deploy strategy is a first-class path now, so the permission table
+		// has no opt-in actions left: every action in scope is shown.
+		Permissions: func(productIDs []string, scopeID string) []tui.GuidePermission {
+			items := a.selectedPermissions(productIDs, scopeID)
 			out := make([]tui.GuidePermission, 0, len(items))
 			for _, p := range items {
 				out = append(out, tui.GuidePermission{
-					Action:       p.Action,
-					Tier:         string(p.Tier),
-					Purpose:      a.Bundle.T(p.PurposeKey),
-					Experimental: p.Experimental,
-					NoGrant:      p.NoGrant,
+					Action:  p.Action,
+					Tier:    string(p.Tier),
+					Purpose: a.Bundle.T(p.PurposeKey),
+					NoGrant: p.NoGrant,
 				})
 			}
 			return out
 		},
 		ServiceRole: tencent.ServiceRole,
 		PolicyHint:  a.Bundle.T("guide.policy_hint"),
-		PolicyJSON: func(productIDs []string, scopeID string, experimental bool) string {
-			text, err := tencent.PolicyJSON(a.policyFilter(productIDs, scopeID, experimental))
+		PolicyJSON: func(productIDs []string, scopeID string) string {
+			text, err := tencent.PolicyJSON(a.policyFilter(productIDs, scopeID))
 			if err != nil {
 				return ""
 			}
 			return text
 		},
 		PolicyName: func(productIDs []string, scopeID string) string {
-			return tencent.PolicyNameSuggestion(a.policyFilter(productIDs, scopeID, a.ExpWrite))
+			return tencent.PolicyNameSuggestion(a.policyFilter(productIDs, scopeID))
 		},
 		PolicySteps:     a.policySteps(),
 		PolicySources:   a.policySources(),
@@ -147,12 +148,13 @@ func (a *App) guideInitialScope() string {
 	return ""
 }
 
-// policyFilter builds the tencent filter for one selection.
-func (a *App) policyFilter(productIDs []string, scopeID string, experimental bool) tencent.PermissionFilter {
+// policyFilter builds the tencent filter for one selection. No action is marked
+// experimental any more (the deploy strategy is verified), so the opt-in flag is
+// deliberately left at its zero value.
+func (a *App) policyFilter(productIDs []string, scopeID string) tencent.PermissionFilter {
 	return tencent.PermissionFilter{
-		Scopes:              a.scopeIDs(productIDs),
-		MaxTier:             a.guideMaxTier(scopeID),
-		IncludeExperimental: experimental,
+		Scopes:  a.scopeIDs(productIDs),
+		MaxTier: a.guideMaxTier(scopeID),
 	}
 }
 
@@ -183,10 +185,10 @@ func (a *App) renderGuide() error {
 	}
 	productIDs := a.guideProductsFromFlag()
 	scope := a.normalisedGuideScope()
-	items := a.selectedPermissions(productIDs, scope, a.ExpWrite)
+	items := a.selectedPermissions(productIDs, scope)
 
 	if a.GuidePolicy || a.GuidePolicyOut != "" {
-		text, err := tencent.PolicyJSON(a.policyFilter(productIDs, scope, a.ExpWrite))
+		text, err := tencent.PolicyJSON(a.policyFilter(productIDs, scope))
 		if err != nil {
 			return err
 		}
@@ -218,23 +220,22 @@ func (a *App) renderGuide() error {
 				out := make([]map[string]any, 0, len(items))
 				for _, p := range items {
 					out = append(out, map[string]any{
-						"action":       p.Action,
-						"tier":         string(p.Tier),
-						"purpose":      a.Bundle.T(p.PurposeKey),
-						"experimental": p.Experimental,
+						"action":  p.Action,
+						"tier":    string(p.Tier),
+						"purpose": a.Bundle.T(p.PurposeKey),
 					})
 				}
 				return out
 			}(),
 		}
-		if text, err := tencent.PolicyJSON(a.policyFilter(productIDs, scope, a.ExpWrite)); err == nil {
+		if text, err := tencent.PolicyJSON(a.policyFilter(productIDs, scope)); err == nil {
 			payload["policy"] = json.RawMessage(text)
-			payload["policy_name"] = tencent.PolicyNameSuggestion(a.policyFilter(productIDs, scope, a.ExpWrite))
+			payload["policy_name"] = tencent.PolicyNameSuggestion(a.policyFilter(productIDs, scope))
 			payload["policy_sources"] = map[string]string{
 				"ssl": tencent.SourceSSL, "cdn": tencent.SourceCDN, "teo": tencent.SourceTEO,
 			}
 			noGrant := []string{}
-			for _, p := range a.selectedPermissions(productIDs, scope, a.ExpWrite) {
+			for _, p := range a.selectedPermissions(productIDs, scope) {
 				if p.NoGrant {
 					noGrant = append(noGrant, p.Action)
 				}
@@ -254,9 +255,6 @@ func (a *App) renderGuide() error {
 		if p.NoGrant {
 			line += " (" + a.Bundle.T("guide.no_grant") + ")"
 		}
-		if p.Experimental {
-			line += " (" + a.Bundle.T("guide.experimental") + ")"
-		}
 		fmt.Fprintln(a.Out, line)
 	}
 	fmt.Fprintln(a.Out)
@@ -271,11 +269,11 @@ func (a *App) renderGuide() error {
 	fmt.Fprintln(a.Out)
 	fmt.Fprintln(a.Out, a.Bundle.T("guide.policy_hint"))
 	fmt.Fprintln(a.Out)
-	text, err := tencent.PolicyJSON(a.policyFilter(productIDs, scope, a.ExpWrite))
+	text, err := tencent.PolicyJSON(a.policyFilter(productIDs, scope))
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(a.Out, "%s %s\n\n", a.Bundle.T("guide.policy_title"), tencent.PolicyNameSuggestion(a.policyFilter(productIDs, scope, a.ExpWrite)))
+	fmt.Fprintf(a.Out, "%s %s\n\n", a.Bundle.T("guide.policy_title"), tencent.PolicyNameSuggestion(a.policyFilter(productIDs, scope)))
 	fmt.Fprint(a.Out, text)
 	fmt.Fprintln(a.Out)
 	for _, step := range a.policySteps() {
@@ -285,11 +283,10 @@ func (a *App) renderGuide() error {
 }
 
 // selectedPermissions resolves the table for one selection.
-func (a *App) selectedPermissions(productIDs []string, scopeID string, experimental bool) []tencent.Permission {
+func (a *App) selectedPermissions(productIDs []string, scopeID string) []tencent.Permission {
 	return tencent.SelectPermissions(tencent.PermissionFilter{
-		Scopes:              a.scopeIDs(productIDs),
-		MaxTier:             a.guideMaxTier(scopeID),
-		IncludeExperimental: experimental,
+		Scopes:  a.scopeIDs(productIDs),
+		MaxTier: a.guideMaxTier(scopeID),
 	})
 }
 

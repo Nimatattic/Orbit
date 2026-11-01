@@ -34,8 +34,8 @@ Every command, in one table. Follow the link for flags and examples.
 | --- | --- | --- |
 | `orbit` | Status overview of all accounts (TUI on a terminal) | [tui.md](tui.md) |
 | `orbit status` | Certificate/resource inventory, pending changes, cleanup candidates | [commands.md](commands.md#orbit-status) |
-| `orbit update --ssl` | Match certificates to domains and apply them | [certificates.md](certificates.md) |
-| `orbit clean --ssl` | Delete certificates no cloud resource uses | [certificates.md](certificates.md) |
+| `orbit update` | Match certificates to domains and apply them | [certificates.md](certificates.md) |
+| `orbit clean` | Delete certificates no cloud resource uses | [certificates.md](certificates.md) |
 | `orbit dash` | Console for one account: apply, clean, overview, self-test | [tui.md](tui.md#console--orbit-dash) |
 | `orbit dns …` | DNS zones and records (CLI and console) | [dns.md](dns.md) |
 | `orbit account add\|list\|remove\|test` | Credentials and access checks | [accounts.md](accounts.md) |
@@ -51,7 +51,10 @@ Every command, in one table. Follow the link for flags and examples.
   would change and exits `0`. See [modes.md](modes.md).
 - **Accounts are explicit when ambiguous.** `--accounts=main` or `--all-accounts`;
   [accounts.md](accounts.md) explains the rules per command.
-- **`--json` makes output machine-readable** on every read command.
+- **`--json` makes output machine-readable** on `status`, `update`, `clean`,
+  `account list`/`test`/`guide` and every `dns` subcommand. It does **not** produce JSON
+  for `version`, `doctor`, `about`, `config show`/`path` or `completion` (they keep their
+  human output), and `dash` stays interactive-only.
 - **Exit codes carry meaning** (`0` ok, `1` fatal, `2` partial, `3` pending changes,
   `4` refused by a safety gate) — see [modes.md](modes.md#exit-codes).
 - **Nothing is stored outside `~/.orbit`** unless you point `ORBIT_HOME` elsewhere;

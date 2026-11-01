@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Crequency/orbit/internal/core"
-	"github.com/Crequency/orbit/internal/exitcode"
+	"github.com/Nimatattic/Orbit/internal/core"
+	"github.com/Nimatattic/Orbit/internal/exitcode"
 )
 
 // dnsFixture builds a stub provider with one zone and two records.

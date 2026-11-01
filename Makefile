@@ -3,15 +3,21 @@
 # The workspace ships its own Go toolchain; source it first:
 #   source ../.toolchains/env.sh
 
-MODULE  := github.com/Crequency/orbit
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+# Read from go.mod instead of hard-coding it: the -X targets must match the
+# module path, and a repo-wide module rename must not silently drop version
+# stamping (an -X on a dead symbol is ignored without an error).
+MODULE  := $(shell sed -n 's/^module[[:space:]]*//p' go.mod 2>/dev/null)
+# Nearest tag, or a neutral placeholder. A commit hash is never reported as a
+# version — the hash already travels in COMMIT. Override with "make VERSION=v1.2.3";
+# release builds run in CI where the tag is present, so they never see the fallback.
+VERSION ?= $(shell git describe --tags --dirty 2>/dev/null || echo v0.0.0-dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -X $(MODULE)/internal/version.Version=$(VERSION) \
            -X $(MODULE)/internal/version.Commit=$(COMMIT) \
            -X $(MODULE)/internal/version.Date=$(DATE)
 
-.PHONY: all build test vet fmt lint tidy verify-api clean install
+.PHONY: all build release test vet fmt fmt-check check tidy lint verify-api install clean
 
 all: build
 
@@ -30,8 +36,21 @@ test:
 vet:
 	go vet ./...
 
+# Rewrite formatting in place. To only verify, use "make fmt-check" or "make check".
 fmt:
 	gofmt -l -w .
+
+# Fail without touching any file: the gate CI enforces on every push.
+fmt-check:
+	@files="$$(gofmt -l .)"; \
+	if [ -n "$$files" ]; then \
+		echo "gofmt is required on:"; echo "$$files"; \
+		echo "run 'make fmt' to fix them"; \
+		exit 1; \
+	fi
+
+# Exactly what CI runs: formatting, vet, tests. Offline by design.
+check: fmt-check vet test
 
 tidy:
 	go mod tidy

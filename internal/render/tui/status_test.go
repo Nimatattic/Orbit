@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Crequency/orbit/internal/i18n"
+	"github.com/Nimatattic/Orbit/internal/i18n"
 )
 
 func testStatusModel(t *testing.T, accounts []string, scan func(context.Context, string) (AccountView, error)) *statusModel {

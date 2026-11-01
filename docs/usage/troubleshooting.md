@@ -10,7 +10,7 @@ Find the symptom, then the cause. Every entry ends with the command that confirm
 | --- | --- | --- |
 | `1` | Bad flags, invalid input, authentication failure, unexpected cloud error | read the message; `orbit account test` |
 | `2` | Some accounts/records/changes failed, others succeeded | scroll up: every failure is printed with its account |
-| `3` | `--fail-on-changes` found work, or `dns check` has not propagated | `orbit status`, `orbit dns check` |
+| `3` | `--fail-on-changes` found work, or `dns check` has not propagated / could not confirm the answer (a failed lookup is `3`, never `1`) | `orbit status`, `orbit dns check` |
 | `4` | A safety gate refused to act | the message names the gate |
 
 ## Certificates
@@ -60,7 +60,7 @@ the domains need:
 
 ```bash
 orbit status --accounts=main          # counts + pending
-orbit status --accounts=main --json | jq '.[0].resources[]'
+orbit status --accounts=main --json | jq '.[0] | {account, resources, unbound, in_use}'
 ```
 
 Orbit does not upload certificates; upload them where they are issued (for example your
@@ -92,8 +92,14 @@ orbit dns set example.com www A 203.0.113.51 --record-id 42 --yes
 
 ### `dns check` exits `3`
 
-The record is configured but public DNS does not answer it yet. Negative caching and TTL
-make this normal for a few minutes.
+The record is configured but public DNS does not answer it yet, **or the lookup could not
+confirm anything**. Negative caching and TTL make this normal for a few minutes; a refused
+or timed-out resolver also lands here, because Orbit reports "unconfirmed" as `3` rather
+than claiming the record is broken. `--json` behaves identically (same exit code, with the
+lookup diagnostic on stderr and a pure JSON document on stdout).
+
+Only a record that is **not configured at all** in the provider exits `1` — there is
+nothing to compare, which is a different problem.
 
 ```bash
 orbit dns check example.com _acme-challenge TXT

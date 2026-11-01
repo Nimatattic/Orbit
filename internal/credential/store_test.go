@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Crequency/orbit/internal/config"
+	"github.com/Nimatattic/Orbit/internal/config"
 )
 
 func TestStoreRoundTripUses0600(t *testing.T) {

@@ -26,6 +26,9 @@ make release
 # 拷到服务器
 scp dist/orbit-linux-amd64 root@server:/usr/local/bin/orbit
 ssh root@server 'chmod 755 /usr/local/bin/orbit && orbit version'
+
+# 仓库发布 v* tag 之后，也可以直接按模块路径安装（module 与仓库同名）
+go install github.com/Nimatattic/Orbit/cmd/orbit@latest
 ```
 
 ## 2. 目录布局（全部在 `~/.orbit/` 下）
@@ -36,7 +39,7 @@ ssh root@server 'chmod 755 /usr/local/bin/orbit && orbit version'
 | `credentials.yaml` | 凭证（**不读 tccli**） | **0600**，权限过宽会拒绝启动 |
 | `audit/audit.jsonl` | 审计日志，每次执行追加 | 0600 |
 | `backups/<账号>/<证书ID>-<时间戳>/` | 删除前备份（`cert.pem` / `key.pem` / `chain.pem` / `meta.json`） | 目录 0700，`key.pem` **0600** |
-| `cache/` | 预留给 `status` 的本地缓存 | — |
+| `cache/` | **不存在**：没有任何代码创建该目录（`status` 复用云端 30 分钟关联缓存，`--no-cache` 可关） | — |
 
 `ORBIT_HOME` 可整体改路径（见 §5 的 cron 示例）。
 
@@ -50,8 +53,12 @@ ssh root@server 'chmod 755 /usr/local/bin/orbit && orbit version'
 | 文件 | 动作数 | 用途 |
 | --- | --- | --- |
 | [`cam/readonly.json`](cam/readonly.json) | 10 | `status` / `doctor` / `account test`，以及一切 `--dry-run` |
-| [`cam/execute.json`](cam/execute.json) | 15 | 只读 + `orbit update --ssl --yes`（`cdn:ModifyDomainConfig`、`teo:ModifyHostsCertificate`） |
-| [`cam/delete.json`](cam/delete.json) | 19 | 执行 + `orbit clean --ssl --yes`（`ssl:DeleteCertificates` 等） |
+| [`cam/execute.json`](cam/execute.json) | 17 | 只读 + 写入（`cdn:ModifyDomainConfig`、`teo:ModifyHostsCertificate`、deploy 路径的 `ssl:DeployCertificateInstance` / `ssl:DescribeHostDeployRecord`） |
+| [`cam/delete.json`](cam/delete.json) | 21 | 执行 + `orbit clean --yes`（`ssl:DeleteCertificates` 等） |
+
+> `deploy` 策略从实验路径转正时，execute/delete 各新增了 `ssl:DeployCertificateInstance`
+> 与 `ssl:DescribeHostDeployRecord` 两个 action。**用 `--strategy=deploy` 的账号，其存量
+> 自定义策略需要补上这两个 action**，否则写入会报 `UnauthorizedOperation`；readonly 不变。
 
 **这三份文件由代码生成，不要手改。** 需要调整时改
 [`internal/cloud/tencent/permissions.go`](../internal/cloud/tencent/permissions.go)，然后：
@@ -234,7 +241,13 @@ ssh root@server 'mv /usr/local/bin/orbit /usr/local/bin/orbit.bak && mv /usr/loc
 ssh root@server 'mv /usr/local/bin/orbit.bak /usr/local/bin/orbit'
 ```
 
-`orbit version` 输出形如 `v0.1.0 (abc1234, 2026-10-11T00:00:00Z)`；审计日志每条都带版本号，便于对照"某次变更是哪个版本做的"。
+`orbit version` 输出形如 `v1.2.3 (abc1234, 2026-11-01T00:00:00Z)`；审计日志每条都带版本号，
+便于对照"某次变更是哪个版本做的"。
+
+版本来自 `git describe --tags`（构建时注入）。**工作树没有 tag 时兜底为 `v0.0.0-dev`**，
+不会拿 commit hash 冒充版本号——commit 与构建时间另有字段：
+`./bin/orbit version` 会打印 `v0.0.0-dev (abc1234, 2026-11-01T00:00:00Z)`。
+发布二进制请从打了 tag 的提交构建，否则版本号就是 `v0.0.0-dev`。
 
 ## 10. 排错速查
 
@@ -249,3 +262,26 @@ ssh root@server 'mv /usr/local/bin/orbit.bak /usr/local/bin/orbit'
 | 想确认某次变更 | `jq -c 'select(.kind=="change" and .result=="failed")' ~/.orbit/audit/audit.jsonl`，或按 `run_id` 串起一次执行 |
 | 需要回滚 | 见 [§8 回滚](#8-回滚)；证书权威源头仍是签发端（如 1Panel） |
 | 感觉"卡住" | 首次关联查询是云端异步任务（上限 5 分钟），`status` 30 分钟内复用缓存；`--progress` 可把进度强制打到 stderr |
+
+## 11. CI 与发布
+
+仓库自带 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)（GitHub Actions，只用官方
+action，不需要任何仓库 secret 或云端凭证——测试全离线）：
+
+| Job | 触发 | 内容 |
+| --- | --- | --- |
+| `test` | push 到 `main`、pull request、`v*` tag | `gofmt -l .` 检查、`go vet ./...`、`go test ./...`；Go 版本取自 `go.mod`（1.27.1） |
+| `build` | `test` 通过后 | `CGO_ENABLED=0 go build -trimpath`，矩阵 linux/amd64、linux/arm64、darwin/arm64 |
+| `release` | 仅 `v*` tag | `make release`，把 `dist/` 三件套上传到 GitHub Release |
+
+- 本地等价门禁：`make check`（= `fmt-check` + `vet` + `test`）；`make release` 产出
+  `dist/orbit-linux-amd64`、`orbit-linux-arm64`、`orbit-darwin-arm64`。
+- **tag 与 GPG 签名由维护者手工完成**，CI 不签名；release job 只发布已存在的 tag 产物。
+- release job 会先校验 `git describe --tags` 与触发 tag 一致，不一致直接失败——避免把
+  `v0.0.0-dev` 的二进制误标成某个版本发布出去。
+- 没有 tag 的本地构建版本号兜底 `v0.0.0-dev`（见 [§9](#9-升级与回滚版本)）。
+
+## 12. License
+
+Orbit 以 **MIT** 授权，全文见仓库根 [`LICENSE`](../LICENSE)。可自由使用、修改与再分发
+（含商用），保留版权声明与许可声明即可；软件按"现状"提供，不含任何明示或默示担保。

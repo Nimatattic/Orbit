@@ -7,8 +7,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/Crequency/orbit/internal/cloud"
-	"github.com/Crequency/orbit/internal/core"
+	"github.com/Nimatattic/Orbit/internal/cloud"
+	"github.com/Nimatattic/Orbit/internal/core"
 )
 
 // Provider is an in-memory Provider.
@@ -126,23 +126,6 @@ func (p *Provider) emit(key string, kv ...any) {
 // Name implements cloud.Provider.
 func (p *Provider) Name() string { return "tencent" }
 
-// Capabilities implements cloud.Provider.
-func (p *Provider) Capabilities() cloud.Capabilities {
-	return cloud.Capabilities{
-		CertGlobal: true,
-		Products: map[core.Product]cloud.ProductCapability{
-			core.ProductCDN: {CanEnumerate: true, CanReadBoundCert: true, CanApplyByCertID: true, CanVerifyAfterDeploy: true, Granularity: "domain", OwnCertField: "Https.CertInfo.CertId"},
-			core.ProductTEO: {CanEnumerate: true, CanReadBoundCert: true, CanApplyByCertID: true, CanVerifyAfterDeploy: true, Granularity: "domain", OwnCertField: "Certificate.List[].CertId"},
-		},
-		DeployNeedsRegion:   map[core.Product]bool{core.ProductCDN: false, core.ProductTEO: false},
-		AsyncDeploy:         true,
-		DeploySerialPerPair: true,
-		SupportsUnbind:      false,
-		VerifyAfterDeploy:   true,
-		ExtraScopes:         []string{"zone"},
-	}
-}
-
 // Preflight implements cloud.Provider.
 func (p *Provider) Preflight(_ context.Context, _ string) ([]core.Check, error) {
 	return []core.Check{
@@ -229,9 +212,14 @@ func (p *Provider) Apply(_ context.Context, _ string, plan core.Plan, opts cloud
 			target = ch.To.ID
 		}
 		p.emit("progress.apply.group", "product", string(ch.Product), "count", 1, "cert", target)
-		p.emit("progress.apply.item", "index", i+1, "total", len(plan.Pending()), "domain", ch.Domain, "cert", target)
-		p.emit("progress.apply.verifying", "domain", ch.Domain)
+		p.emit("progress.apply.item", "product", string(ch.Product), "index", i+1, "total", len(plan.Pending()), "domain", ch.Domain, "cert", target)
+		p.emit("progress.apply.verifying", "product", string(ch.Product), "domain", ch.Domain)
 		res := core.Result{Change: ch, OK: true, Verified: !opts.DryRun}
+		if opts.DryRun {
+			// Same contract as the real provider: a dry run reports success
+			// without writing, and says so with a recognisable key.
+			res.MessageKey = cloud.MsgDryRun
+		}
 		if !opts.DryRun {
 			for i := range p.resources {
 				if p.resources[i].Product == ch.Product && p.resources[i].Domain == ch.Domain {
@@ -245,7 +233,7 @@ func (p *Provider) Apply(_ context.Context, _ string, plan core.Plan, opts cloud
 			}
 		}
 		if !opts.DryRun {
-			p.emit("progress.apply.verified", "domain", ch.Domain)
+			p.emit("progress.apply.verified", "product", string(ch.Product), "domain", ch.Domain)
 		}
 		results = append(results, res)
 	}
@@ -262,14 +250,18 @@ func (p *Provider) DeleteCertificates(_ context.Context, _ string, certIDs []str
 	kept := make([]core.Certificate, 0, len(p.certs))
 	for _, c := range p.certs {
 		if wanted[c.ID] {
-			results = append(results, core.Result{
+			res := core.Result{
 				Change:   core.Change{Kind: core.KindDelete, To: core.Ref(c)},
 				OK:       true,
 				Verified: !opts.DryRun,
-			})
+			}
 			if opts.DryRun {
+				// Nothing was deleted, so nothing can be verified; the result
+				// still succeeds and carries the dry-run key.
+				res.MessageKey = cloud.MsgDryRun
 				kept = append(kept, c)
 			}
+			results = append(results, res)
 			continue
 		}
 		kept = append(kept, c)

@@ -4,7 +4,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"github.com/Crequency/orbit/internal/i18n"
+	"github.com/Nimatattic/Orbit/internal/i18n"
 )
 
 // commandKeys maps command names to message keys.
@@ -50,27 +50,26 @@ var commandLongKeys = map[string]string{
 
 // flagKeys maps flag names to message keys.
 var flagKeys = map[string]string{
-	"config":                    "flag.config",
-	"lang":                      "flag.lang",
-	"local":                     "flag.local",
-	"global":                    "flag.global",
-	"no-tui":                    "flag.no_tui",
-	"demo":                      "flag.demo",
-	"json":                      "flag.json",
-	"accounts":                  "flag.accounts",
-	"all-accounts":              "flag.all_accounts",
-	"platforms":                 "flag.platforms",
-	"products":                  "flag.products",
-	"domains":                   "flag.domains",
-	"dry-run":                   "flag.dry_run",
-	"yes":                       "flag.yes",
-	"fail-on-changes":           "flag.fail_on_changes",
-	"strategy":                  "flag.strategy",
-	"older-than":                "flag.older_than",
-	"include-free":              "flag.include_free",
-	"permit-partial-scan":       "flag.permit_partial_scan",
-	"backup-dir":                "flag.backup_dir",
-	"enable-experimental-write": "flag.experimental_write",
+	"config":              "flag.config",
+	"lang":                "flag.lang",
+	"local":               "flag.local",
+	"global":              "flag.global",
+	"no-tui":              "flag.no_tui",
+	"demo":                "flag.demo",
+	"json":                "flag.json",
+	"accounts":            "flag.accounts",
+	"all-accounts":        "flag.all_accounts",
+	"platforms":           "flag.platforms",
+	"products":            "flag.products",
+	"domains":             "flag.domains",
+	"dry-run":             "flag.dry_run",
+	"yes":                 "flag.yes",
+	"fail-on-changes":     "flag.fail_on_changes",
+	"strategy":            "flag.strategy",
+	"older-than":          "flag.older_than",
+	"include-free":        "flag.include_free",
+	"permit-partial-scan": "flag.permit_partial_scan",
+	"backup-dir":          "flag.backup_dir",
 }
 
 // localize rewrites help text of the whole command tree into the resolved

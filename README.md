@@ -9,6 +9,7 @@
 [![TUI](https://img.shields.io/badge/TUI-Bubble%20Tea-FF75B7)](https://github.com/charmbracelet/bubbletea)
 [![i18n](https://img.shields.io/badge/i18n-English%20%7C%20%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-4B8BBE)](locales)
 [![Status](https://img.shields.io/badge/status-alpha-orange)](docs/IMPLEMENTATION_PLAN.md)
+[![CI](https://github.com/Nimatattic/Orbit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Nimatattic/Orbit/actions/workflows/ci.yml)
 
 [![Stars](https://img.shields.io/github/stars/Nimatattic/Orbit?style=flat&color=yellow)](https://github.com/Nimatattic/Orbit/stargazers)
 [![Last commit](https://img.shields.io/github/last-commit/Nimatattic/Orbit)](https://github.com/Nimatattic/Orbit/commits/main)
@@ -87,7 +88,7 @@ scp dist/orbit-linux-amd64 root@server:/usr/local/bin/orbit
 make build && make install
 ```
 
-Full instructions, including the `go install` caveat:
+Full instructions, including `go install`:
 [getting-started.md](docs/usage/getting-started.md#1-install).
 
 ## Usage
@@ -123,6 +124,7 @@ source ../.toolchains/env.sh     # if you use the workspace-managed toolchain
 make build                       # bin/orbit
 make test                        # full suite, fully offline
 make vet                         # go vet
+make check                       # fmt check + vet + test, exactly what CI runs
 make lint                        # vet + golangci-lint when installed
 make release                     # three static binaries into dist/
 ```
@@ -197,7 +199,8 @@ testdata/                  fixtures
 - [ ] Additional providers (Alibaba Cloud, AWS)
 - [ ] Per-domain certificate pairs (RSA + SM2) instead of a single binding
 - [ ] `orbit restore` — re-upload a certificate straight from `~/.orbit/backups`
-- [ ] CI (vet + tests + release) and signed tags
+- [x] CI (vet + tests + release binaries)
+- [ ] GPG-signed tags and releases (maintainer, manual)
 
 ## Contributing
 
@@ -220,9 +223,11 @@ Issues and pull requests are welcome. Before opening one:
 
 ## License
 
-No license file has been added yet. Until one is, the code is all-rights-reserved.
-**Choose a license before publishing** — MIT is the simplest option for a tool like this;
-Apache-2.0 adds an explicit patent grant.
+[MIT](LICENSE) © 2026 Nimatattic.
+
+Use, modify and redistribute it freely, including commercially; keep the copyright notice
+and the permission notice. The software ships without warranty of any kind. See
+[`LICENSE`](LICENSE) for the binding text.
 
 ## Star History
 

@@ -11,9 +11,9 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/Crequency/orbit/internal/config"
-	"github.com/Crequency/orbit/internal/tty"
-	"github.com/Crequency/orbit/internal/version"
+	"github.com/Nimatattic/Orbit/internal/config"
+	"github.com/Nimatattic/Orbit/internal/tty"
+	"github.com/Nimatattic/Orbit/internal/version"
 )
 
 // logoArt is the wordmark drawn by `orbit about` and shown in the README. It is

@@ -6,6 +6,13 @@
 > **v0.4 变更**（文档调研回填）：① CDN 默认写路径改为 `ModifyDomainConfig(Route="Https.CertInfo.CertId")` **单点更新**，整对象回写风险消除；② EdgeOne 默认写路径 `ModifyHostsCertificate(Mode="sslcert")`，`Mode` 枚举已确认；③ EdgeOne"双证书体系"从**风险**降级为**已明确的语义**（按 `Mode` 判定），仅剩一个业务选择（B2b）；④ `Https.SslStatus` 取值确认（closed/deploying/deployed/failed）；⑤ teo 的 Domain 定位方式确认（全局唯一、无需 ZoneId）；⑥ 待实测清单从 3 项 P0 降为 5 项参数级打磨，工期 20 → 19.5 人日。
 > **v0.3 变更**：① 按 A1–A9 收窄范围到 **CDN + EdgeOne**（CLB 等挪到后续批次）；② 凭证改为**用户手动录入 + Orbit 自管存储**，禁止读取 `~/.tccli`；③ 全局配置目录 `~/.orbit`，新增多语言（i18n）；④ `update` 候选池 = 全部证书，`clean` 只作用于 `FilterSource=upload`；⑤ CDN/TEO 字段用 SDK 源码核实。
 
+> **文档状态（2026-11 追加）：本文是设计稿，不是使用说明——实现以源码为准。**
+> 文中出现的若干 CLI 项（`--watch`、`--format`、`--color`、`--log-level`、`--log-file`、
+> `--json-errors`、`--parallel-accounts`、`--allow-expired`、`ORBIT_CONFIG`、实验写开关，
+> 以及 §4.5 的本地 `~/.orbit/cache` 目录）**均未实现**（该目录根本不会被创建）；完整差异见
+> [附录 C](#附录-c本文出现但未实现的-cli-项设计稿--实现)。当前用法以
+> [docs/usage/](usage/README.md) 为准，行为变更记录在 [DECISIONS.md](../DECISIONS.md)。
+
 ---
 
 ## 0. 一页速读（TL;DR）
@@ -13,7 +20,7 @@
 - **它是什么**：装在服务器或运维机上的单文件 CLI/TUI 工具，把「腾讯云 SSL 证书池」与「**CDN 加速域名 / EdgeOne 站点域名**」对齐，自动完成 **证书应用（`update`）**、**全景巡检（`status`）**、**无用证书清理（`clean`）**。
 - **范围**：首批只支持 **CDN（`cdn`）与 EdgeOne（`teo`）**；多账号从第一天就按 N 个账号建模（你现有 2 个）。
 - **它不做什么**：不申请/续签证书（1Panel 负责）、不上传证书到腾讯云（你现有 tccli 定时任务负责）、不创建资源、不做 HTTPS 解绑、不读 `~/.tccli` 凭证。
-- **技术栈**：Go 1.27 + Cobra + Bubble Tea/Bubbles/Lip Gloss + 官方 `tencentcloud-sdk-go`；module `github.com/Crequency/orbit`；静态单文件二进制。
+- **技术栈**：Go 1.27 + Cobra + Bubble Tea/Bubbles/Lip Gloss + 官方 `tencentcloud-sdk-go`；module `github.com/Nimatattic/Orbit`；静态单文件二进制。
 - **四条决定性事实**（塑造了整个设计）：
   1. **证书是全局资源**（SSL 证书接口不需要 Region），而 v1 的两个产品（CDN、EdgeOne）**部署也都不需要 Region** → **v1 完全没有地域扇出**，引擎比预想简单得多（能力位仍保留，供后续 CLB 等产品使用）。
   2. **同一（证书 × 资源类型）同时只能有一个部署任务**，部署是异步的，`DeployStatus=0` 表示"已有进行中任务"而非"排队成功" → 按该维度串行 + 轮询到终态 + **回读复核**。
@@ -74,7 +81,7 @@
 | A5 | TUI + CLI 双模式；`--yes` 直接执行，`--dry-run` 演练 | §3.5 行为矩阵：默认（TTY）出计划并交互确认；非 TTY 无 `--yes` 时**不写云端**（B6 确认退出码） |
 | A6 | 首批无 CLB → 地域问题不适用 | v1 无地域扇出；能力位 `DeployNeedsRegion` 保留 |
 | A7 | `orbit push` 预留接口，第一批不做 | Provider 接口预留在 §4.2（`UploadCertificate` 能力位），CLI 不暴露命令 |
-| A8 | `github.com/Crequency/orbit`，仓库在 `tools/orbit/` | go.mod module 路径已定 |
+| A8 | `github.com/Nimatattic/Orbit`，仓库在 `tools/orbit/` | go.mod module 路径已定（v1.23 统一为与仓库同名） |
 | A9 | 选型通过；多语言；`orbit config --global language="en-US"`；全局配置 `~/.orbit` | §3.7 i18n + §6 目录布局 |
 
 ---
@@ -124,7 +131,7 @@
 | **S-CDN（CDN 默认）** | `ModifyDomainConfig{Domain, Route="Https.CertInfo.CertId", Value="{\"update\":\"<CertId>\"}"}` | CDN 换证书 | ✅ **文档已确认**：官方示例 4 就是"更新 HTTPS 服务器证书 ID"；**点分路径单点更新，非叶子节点配置保持不变** → 彻底避开整对象回写风险 |
 | **S-TEO（EdgeOne 默认）** | `ModifyHostsCertificate{ZoneId, Hosts[], Mode="sslcert", ServerCertInfo=[{CertId}]}` | EdgeOne 换证书 | ✅ **文档已确认**：`Mode` 枚举为 `disable` / `eofreecert` / `eofreecert_manual` / `sslcert`，`ServerCertInfo` 仅 `Mode=sslcert` 生效且传 SSL 证书 ID |
 | **S-UNI 统一部署**（备用/批量） | `DeployCertificateInstance(certId, ResourceType=cdn\|teo, InstanceIdList)` | 一次把某证书批量打到一批域名 | ✅ 逐字段已核实；`cdn` 用 `Domain\|on/off`，`teo` 用 `Domain`；都不需要 Region。注意它会占用"同证书同资源类型"的任务名额 |
-| **S-REPLACE 旧证换新证**（可选优化） | `UpdateCertificateInstance(OldCertificateId → CertificateId)` | 能配对出"旧→新"时 | ⚠️ 入参结构未实测，默认关闭 |
+| **S-REPLACE 旧证换新证**（可选优化） | `UpdateCertificateInstance(OldCertificateId → CertificateId)` | —— | ❌ **未实现**（入参结构未实测；原实验开关已删除，见附录 C） |
 
 **执行层的三条硬约束（官方原文）**
 
@@ -136,7 +143,7 @@
    - 统一交叉校验：`DescribeHostCdnInstanceList` / `DescribeHostTeoInstanceList`（SSL 侧的"证书 → 实例"视图）
    不一致则重试或标记失败，**不以接口返回成功为准**。
 
-> **写路径闸门（已收窄）**：原先担心的"EdgeOne 写语义未验证"已由文档解决，**常规换证书不再需要实验性开关**。保留的闸门只针对两件事：① 未实测的 `UpdateCertificateInstance`（S-REPLACE）；② 把 EdgeOne 域名从 **EdgeOne 免费证书**（`Mode=eofreecert*`）切换到 SSL 托管证书 —— 这是行为变更（免费证书 90 天自动续期 → 改用你上传的证书），默认**列入计划并明确标注**，可用 `edgeone.replace_free_cert=false` 改成"只报告不动"（见 B2b）。
+> **写路径闸门（已收窄）**：原先担心的"EdgeOne 写语义未验证"已由文档解决，**常规换证书与 deploy 策略都不再需要任何实验开关**（实验面已在 v1.24 整体删除）。真正保留的约束只有两条：① `UpdateCertificateInstance`（S-REPLACE）**未实现**，计划里不会出现该策略（见附录 C）；② 把 EdgeOne 域名从 **EdgeOne 免费证书**（`Mode=eofreecert*`）切换到 SSL 托管证书是行为变更（免费证书 90 天自动续期 → 改用你上传的证书），默认**列入计划并明确标注**，可用 `edgeone.replace_free_cert=false` 改成"只报告不动"（见 B2b）。
 
 ### 2.3 难题三：删除的安全边界（最重要）
 
@@ -183,10 +190,10 @@ orbit update --ssl                     # 核心：匹配 + 应用证书
       --accounts=main,hk | --all-accounts
       --products=cdn,teo
       --domains=www.example.com,*.a.com
-      --strategy=auto|deploy|replace   #   见 §2.2（默认 auto = S2）
+      --strategy=auto|product|deploy  #   见 §2.2（默认 auto；无 replace）
       --dry-run                        #   只出计划，不写云端
       --yes                            #   跳过交互确认，直接执行
-      --enable-experimental-write      #   允许尚未实测确认的策略（当前仅 S-REPLACE 旧证换新证）
+      # 实验写开关已随实验面整体删除：deploy 是正式策略，见附录 C
       --fail-on-changes                #   有变更则退出码 3（给 cron 用）
 
 orbit clean --ssl                      # 清理无资源使用的证书
@@ -284,7 +291,7 @@ orbit clean --ssl --platforms=tencent
 | `--yes` | 出计划 → 直接执行（非交互） |
 | **非 TTY，无 `--yes`** | 出计划，**不写云端**，退出码 0（`--fail-on-changes` 时为 3）—— 见 B6 待确认 |
 | 账号歧义且无 TTY | 报错退出（退出码 4），提示 `--accounts` 或 `--all-accounts` |
-| 未实测策略（S-REPLACE 旧证换新证）未加 `--enable-experimental-write` | 该计划条目标记 `BLOCKED(experimental)`，不执行（退出码 2 或 4） |
+| 未实测策略（S-REPLACE 旧证换新证） | **未实现**：实验面已整体删除，不存在的策略直接报 `Unknown strategy`（见附录 C） |
 
 **退出码契约**
 
@@ -370,7 +377,7 @@ type ProductCapability struct {
     CanEnumerate, CanReadBoundCert, CanApplyByCertID, CanVerifyAfterDeploy bool
     Granularity  string   // cdn=domain, teo=domain-in-zone
     OwnCertField string   // cdn: Https.CertInfo.CertId; teo: AccelerationDomain.Certificate.List[].CertId
-    Experimental bool     // 策略是否尚未实测确认（当前仅 S-REPLACE=true；cdn/teo 的常规换证书均已文档确认）
+    // 实验位已删除：deploy 与常规换证书都是正式路径（见附录 C）
 }
 ```
 
@@ -380,7 +387,7 @@ type ProductCapability struct {
 
 ```
 orbit/
-├── go.mod / Makefile            # module github.com/Crequency/orbit
+├── go.mod / Makefile            # module github.com/Nimatattic/Orbit
 ├── cmd/orbit/main.go            # 仅装配 + cli.Execute()
 ├── internal/
 │   ├── cli/                     # cobra 命令、flag、TTY 探测、退出码映射
@@ -430,7 +437,7 @@ type Resource struct {              // CDN 域名 或 EdgeOne 站点域名
 type Change struct {
     Account string; Product Product; ZoneID, ResourceID, ResourceName, Domain string
     Kind ChangeKind  // ApplyCert | UpToDate | NoCertFound | NeedsManual | DeleteCert | SkipWithReason | Blocked
-    Strategy string  // S2 deploy / S1 replace / S3 cdn-route / S4 teo-product
+    Strategy string  // deploy / product（S1 replace 未实现，见附录 C）
     From, To *CertRef
     Risk Risk        // Low | Medium | High
     Evidence []string
@@ -443,7 +450,7 @@ type Change struct {
 - **幂等**：计划期比对"当前绑定 == 目标证书"则跳过（`UpToDate`）；重跑安全。
   - 顺带好处：腾讯云对"部署与当前绑定相同的证书"会直接报错，而我们根本不会发出这种调用。
 - **审计**：`~/.orbit/audit/audit.jsonl` 追加写（时间、账号、动作、目标、变更前后、策略、部署记录 ID、结果、错误码、耗时）；凭证脱敏。
-- **缓存**：仅 `status` 使用（`~/.orbit/cache/<account>.json`，TTL 60s，`--no-cache` 可关）；`update`/`clean` **永不用缓存**，`clean` 强制 `IsCache=0`。
+- **缓存**：**没有本地缓存文件**。云端关联查询自带 `IsCache=1` 的 30 分钟缓存，只有 `status` 复用它（`--no-cache` 强制实时）；`update` 跳过关联查询，`clean` 强制 `IsCache=0` 实时取证，因为清理要据此下结论。
 
 ### 4.6 并发、限流与错误处理
 
@@ -479,7 +486,7 @@ type Change struct {
 | L1 计划 | `update`/`clean` 打印将发生什么（diff + 风险 + 证据） | 默认（TTY 下）与 `--dry-run` |
 | L2 执行 | 真正下发变更 | `--yes` 或 TUI 确认 |
 | L3 销毁 | 删除证书 | `--yes` + G1–G4 全通过 + 备份成功 |
-| L4 实验性 | 尚未实测确认的写路径 | 额外需要 `--enable-experimental-write` |
+| L4 实验性 | 尚未实测确认的写路径 | **已不存在**：实验面整体删除，deploy 为正式策略（附录 C） |
 
 补充原则：
 
@@ -499,7 +506,7 @@ type Change struct {
 ~/.orbit/
 ├── config.yaml          # 全局配置（含 language、账号、产品、范围）
 ├── credentials.yaml     # 凭证（0600；SecretId/SecretKey，可选用主密码加密）
-├── cache/               # status 缓存（TTL 60s）
+├── cache/               # 不创建（无本地缓存；status 用云端 30 分钟缓存）
 ├── audit/audit.jsonl    # 审计
 └── backups/             # clean 删除前备份（<account>/<certid>-<time>/）
 ```
@@ -518,12 +525,12 @@ language: zh-CN                 # 也可 en-US；可被 --lang / ORBIT_LANG 覆�
 defaults:
   platforms: [tencent]
   products: [cdn, teo]
-  strategy: auto                # auto(=S2) | deploy | replace
+  strategy: auto                # auto(=各产品原生 API) | deploy
   concurrency: { products: 4, changes: 2 }
   timeouts: { api: 15s, deploy_poll: 5m }
   cert_preference: [upload, buy]
   domain_match: { wildcard: true, allow_expired: false }
-  experimental_write: false     # 未实测策略（S-REPLACE）默认关闭
+  # experimental_write 键已删除（实验面不存在，写了会被未知键拒绝）
   edgeone:
     replace_free_cert: true     # EdgeOne 免费证书域名是否默认替换为 SSL 托管证书（见 B2b）
   clean:
@@ -555,7 +562,7 @@ platforms:
 ### 6.4 凭证录入与存储（按 A1）
 
 - `orbit account add`：交互式，隐藏输入 SecretId / SecretKey（可选二次确认），生成别名，写入 `~/.orbit/credentials.yaml`（0600），并立即调用 `Preflight` 校验（凭证有效性 + 服务角色 + 权限）。
-- 非交互：`orbit account add --alias main --secret-id-env ...`；或 `--from-stdin`（从管道读取，不落 shell history）。
+- 非交互：`orbit account add --alias main --from-stdin`（从管道读取，不落 shell history）。设计稿里的 `--secret-id-env` 未实现且已删除，见附录 C。
 - 环境变量注入（cron 推荐）：`source /etc/orbit/env` 后 `credential: {source: env}`，配置文件里只有变量名。
 - **加密可选**（B1）：若你要求，则用 `ORBIT_MASTER_PASSPHRASE` + Argon2id → AES-GCM 加密 `credentials.yaml`；代价是 cron 也需要注入口令。
 
@@ -602,7 +609,7 @@ platforms:
 
 ```bash
 source .toolchains/env.sh
-go build -ldflags "-X github.com/Crequency/orbit/internal/version.Version=$(git describe --tags --always)" -o bin/orbit ./cmd/orbit
+go build -ldflags "-X github.com/Nimatattic/Orbit/internal/version.Version=$(git describe --tags)" -o bin/orbit ./cmd/orbit
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o orbit-linux-amd64 ./cmd/orbit   # 部署到服务器
 CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -o orbit-darwin-arm64 ./cmd/orbit  # 本机 TUI 使用
 ```
@@ -868,9 +875,9 @@ CLB（`DescribeListeners` + SNI `Rules` + `ModifyDomainAttributes`）、WAF、AP
 
 ```bash
 # 每周一 03:30 演练（有变更则退出码 3，可触发告警）
-30 3 * * 1 /usr/local/bin/orbit update --ssl --accounts=main --dry-run --fail-on-changes --format=json >> /var/log/orbit.log 2>&1
+30 3 * * 1 /usr/local/bin/orbit update --accounts=main --dry-run --fail-on-changes --json >> /var/log/orbit.log 2>&1
 # 04:00 真正执行
-0  4 * * 1 /usr/local/bin/orbit update --ssl --accounts=main --yes --format=json >> /var/log/orbit.log 2>&1
+0  4 * * 1 /usr/local/bin/orbit update --accounts=main --yes --json >> /var/log/orbit.log 2>&1
 # 04:30 清理超期无用证书（自动备份到 ~/.orbit/backups）
 30 4 * * 1 /usr/local/bin/orbit clean --ssl --accounts=main --yes --older-than=7d >> /var/log/orbit.log 2>&1
 ```
@@ -882,11 +889,35 @@ Description=Orbit SSL 巡检与应用
 [Service]
 Type=oneshot
 EnvironmentFile=/etc/orbit/env      # 内含 ORBIT_TENCENT_MAIN_SECRET_ID / _SECRET_KEY
-ExecStart=/usr/local/bin/orbit update --ssl --accounts=main --yes --format=json
+ExecStart=/usr/local/bin/orbit update --accounts=main --yes --json
 StandardOutput=append:/var/log/orbit.log
 StandardError=append:/var/log/orbit.log
 ```
 
+## 附录 C：本文出现但未实现的 CLI 项（设计稿 ≠ 实现）
+
+本文写成于 M0 之前，里面列过一批当时设想的 flag 与环境变量。落地时其中一部分**没有
+实现**，它们不会出现在 `orbit --help` 里；把下面的表当成"设计稿与实现的差异清单"：
+
+| 设计稿中的项 | 现状 | 替代做法 / 说明 |
+| --- | --- | --- |
+| `--watch=30s` | 未实现 | 无常驻监听；定时任务用 cron 或 systemd timer（[OPERATIONS.md](OPERATIONS.md) §5–§6） |
+| `--format=table\|json\|ndjson` | 未实现 | 只有 `--json` 开关（输出 JSON）；默认文本；没有 ndjson |
+| `--color=auto\|always\|never` | 未实现为 flag | 颜色由 TTY 自动判断，`NO_COLOR=1` 可关闭 |
+| `--log-level` / `--log-file` | 未实现 | 进度与告警都写 stderr，直接重定向：`orbit update --yes 2>>/var/log/orbit.log` |
+| `--json-errors` | 未实现 | 错误始终以文本写 stderr；`--json` 只影响正常输出 |
+| `--parallel-accounts` | 未实现 | 多账号始终串行处理（日志清晰、易中断） |
+| `--allow-expired` | 未实现为 flag | 用配置项 `defaults.domain_match.allow_expired: true` |
+| `--secret-id-env` | **已删除**（从未可用） | `account add --from-stdin`，或配置 `credential.source: env` |
+| `ORBIT_CONFIG` | 未实现 | 用 `--config <path>`；`ORBIT_HOME`/`ORBIT_LANG`/`ORBIT_NO_TUI` 有效 |
+| `~/.orbit/cache/`（§4.5、§6 目录树） | **不存在，也不会被创建** | `config.EnsureHome` 已删除、`config.CacheDir()` 无任何调用点；`status` 复用**云端** 30 分钟关联缓存（`IsCache=1`），`--no-cache` 强制实时 |
+| 实验写开关（CLI flag 与配置键） | **已删除** | `deploy` 是正式策略，无需开关。`orbit config defaults.experimental_write=false`（写未知键）会 exit 1 被拒；但**手写 config.yaml 里的未知键会被静默忽略**（配置解码非严格），不要指望它报错 |
+| `--strategy=replace` / S-REPLACE | **未实现** | 只剩 `auto` / `product` / `deploy`；`replace` 报 `Unknown strategy`（supported: auto, deploy, product） |
+| `core.KindBlocked` / `core.ReasonExperimental` / `ApplyOptions.ExperimentalWrite` | **已删除** | 实验面清理的连带删除，无调用方 |
+| `Capabilities()` 能力位（§4.2） | **已删除** | 能力由 Provider 接口本身表达，该结构体与实现均已移除 |
+| `orbit push`（A7 预留） | 未实现 | 不暴露命令；上传证书仍由签发端（如 1Panel）负责 |
+
 ---
 
 *本文件为待审阅草案（v0.3）。B1–B7 确认后写入 [DECISIONS.md](../DECISIONS.md)；§8.6 的实测结论回填《[Tencent API 事实清单](TENCENT_API_NOTES.md)》。*
+*2026-11 追加：状态横幅与附录 C 由文档纠偏补充，记录设计稿与当前实现的差异。*

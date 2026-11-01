@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Crequency/orbit/internal/core"
-	"github.com/Crequency/orbit/internal/exitcode"
+	"github.com/Nimatattic/Orbit/internal/core"
+	"github.com/Nimatattic/Orbit/internal/exitcode"
 	tcerr "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/errors"
 )
 

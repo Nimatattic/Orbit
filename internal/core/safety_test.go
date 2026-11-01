@@ -171,3 +171,28 @@ func TestProtectedMatchesAliasAndDomain(t *testing.T) {
 		t.Fatalf("domain pattern must protect the certificate, got %q", got)
 	}
 }
+
+// TestCleanCandidatesCollectsEveryBoundCertID covers EdgeOne hosts that hold
+// more than one certificate (for example RSA + SM2): BoundCert is only the
+// primary entry, so a certificate that appears elsewhere in BoundCertIDs is
+// still in use and must never be deleted.
+func TestCleanCandidatesCollectsEveryBoundCertID(t *testing.T) {
+	now := time.Now()
+	certs, evidence, resources := safetyFixture(now)
+	resources = append(resources, Resource{
+		Product: ProductTEO, ZoneID: "zone-1", Domain: "edge.example.com",
+		BoundCert: "primary-cert", BoundCertIDs: []string{"primary-cert", "old-superseded"},
+	})
+
+	plan := CleanCandidates(certs, evidence, resources, CleanOptions{
+		Now: now, OlderThan: 7 * 24 * time.Hour, RequireFullEvidence: true,
+	})
+	if got := skipReason(t, plan, "old-superseded"); got != ReasonInUse {
+		t.Fatalf("a non-primary bound certificate must count as in use, got %q", got)
+	}
+	for _, c := range plan.Candidates {
+		if c.Cert.ID == "old-superseded" {
+			t.Fatal("a certificate held by a resource must never be a candidate")
+		}
+	}
+}

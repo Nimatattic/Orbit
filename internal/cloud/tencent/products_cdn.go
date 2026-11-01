@@ -8,7 +8,7 @@ import (
 	cdn "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdn/v20180606"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 
-	"github.com/Crequency/orbit/internal/core"
+	"github.com/Nimatattic/Orbit/internal/core"
 )
 
 // cdnCertRoute is the dotted config path whose leaf is the server certificate
@@ -117,8 +117,12 @@ func (p *Provider) setCDNCertificate(ctx context.Context, domain, certID string)
 // verifyCDN polls until the domain reports the expected certificate. A timeout
 // is returned as (false, state, nil): the write was accepted but is not
 // confirmed yet, which the caller reports without marking it failed.
+//
+// The budget is VerifyTimeout, like EdgeOne's read-back: a product-side write
+// propagates much faster than the asynchronous SSL deploy task, so borrowing
+// PollTimeout here would wait five times longer than necessary.
 func (p *Provider) verifyCDN(ctx context.Context, domain, certID string) (bool, string, error) {
-	deadline := p.now().Add(p.opts.PollTimeout)
+	deadline := p.now().Add(p.opts.VerifyTimeout)
 	state := ""
 	for {
 		res, found, err := p.getCDNDomain(ctx, domain)

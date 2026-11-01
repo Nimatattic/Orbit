@@ -21,7 +21,7 @@ and trailing dots for you, and rejects a name that already carries the zone suff
 
 ```bash
 orbit dns zones                                   # zones, record counts, plan
-orbit dns zones --json | jq '.[] | {zone: .zone.Name, records: .zone.RecordCount}'
+orbit dns zones --json | jq '.[] | {zone: .zone.name, records: .zone.record_count}'
 orbit dns ls example.com                          # every record
 orbit dns ls example.com --type CNAME             # filter by type
 orbit dns ls example.com --name www               # filter by name
@@ -86,9 +86,29 @@ answers:     some-validation-token
 _challenge.example.com has propagated
 ```
 
-Exit codes: `0` propagated, `3` not yet visible (the record exists but has not spread), `1`
-the record is not configured at all or the lookup failed. `--server` points the query at a
-specific resolver (`host` or `host:port`, default `:53`).
+Exit codes, identical in text and `--json` mode:
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Every configured value is visible in public DNS |
+| `3` | Not propagated yet, **or** the answer could not be confirmed: a failed DNS lookup is reported as `3`, never as `1` |
+| `1` | The record itself is not configured in the provider (nothing to compare), or the zone/account cannot be read |
+
+A lookup failure is a diagnostic line, not a verdict on the record: it goes to **stderr**
+in `--json` mode (so stdout stays a single parseable document) and the comparison still
+runs with whatever answers arrived. Only a record that does not exist at all returns `1`.
+`--server` points the query at a specific resolver (`host` or `host:port`, default `:53`).
+
+```json
+{
+  "zone": "example.com",
+  "fqdn": "www.example.com",
+  "type": "CNAME",
+  "configured": ["static.example.net"],
+  "answers": [],
+  "missing": ["static.example.net"]
+}
+```
 
 A CNAME query that returns the queried name itself means "no CNAME here" and is reported as
 such rather than as a matching answer.

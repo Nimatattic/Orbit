@@ -1,4 +1,4 @@
-module github.com/Crequency/orbit
+module github.com/Nimatattic/Orbit
 
 go 1.27.1
 

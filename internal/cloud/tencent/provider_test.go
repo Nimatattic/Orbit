@@ -16,8 +16,8 @@ import (
 	sts "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/sts/v20180813"
 	teo "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/teo/v20220901"
 
-	"github.com/Crequency/orbit/internal/cloud"
-	"github.com/Crequency/orbit/internal/core"
+	"github.com/Nimatattic/Orbit/internal/cloud"
+	"github.com/Nimatattic/Orbit/internal/core"
 )
 
 // ---------------------------------------------------------------- test clock
@@ -79,6 +79,10 @@ func testProviderWithSTS(t *testing.T, s sslAPI, c cdnAPI, e teoAPI, stsClient s
 
 type fakeSSL struct {
 	certs []*ssl.Certificates
+
+	// deployHook runs at the start of DeployCertificateInstance; tests use it to
+	// observe whether two writes overlap in time.
+	deployHook func()
 
 	bindCreateResponse *ssl.CreateCertificateBindResourceSyncTaskResponse
 	bindPollResponses  []*ssl.DescribeCertificateBindResourceTaskResultResponse
@@ -173,6 +177,9 @@ func (f *fakeSSL) DeployCertificateInstance(req *ssl.DeployCertificateInstanceRe
 	if err := f.maybeFail("DeployCertificateInstance"); err != nil {
 		return nil, err
 	}
+	if f.deployHook != nil {
+		f.deployHook()
+	}
 	f.deployRequests = append(f.deployRequests, req)
 	if f.deployResponse != nil {
 		return f.deployResponse, nil
@@ -228,6 +235,9 @@ func (f *fakeSTS) GetCallerIdentity(*sts.GetCallerIdentityRequest) (*sts.GetCall
 type fakeCDN struct {
 	domains    []*cdn.DetailDomain
 	modifyReqs []*cdn.ModifyDomainConfigRequest
+	// modifyHook runs at the start of ModifyDomainConfig; tests use it to
+	// observe whether two writes overlap in time.
+	modifyHook func()
 }
 
 func (f *fakeCDN) DescribeDomainsConfig(*cdn.DescribeDomainsConfigRequest) (*cdn.DescribeDomainsConfigResponse, error) {
@@ -238,6 +248,9 @@ func (f *fakeCDN) DescribeDomainsConfig(*cdn.DescribeDomainsConfigRequest) (*cdn
 }
 
 func (f *fakeCDN) ModifyDomainConfig(req *cdn.ModifyDomainConfigRequest) (*cdn.ModifyDomainConfigResponse, error) {
+	if f.modifyHook != nil {
+		f.modifyHook()
+	}
 	f.modifyReqs = append(f.modifyReqs, req)
 	var payload struct {
 		Update string `json:"update"`
@@ -271,6 +284,9 @@ type fakeTEO struct {
 	failDomains map[string]error
 	// listCalls counts enumeration calls, to assert polling behaviour.
 	listCalls int
+	// modifyHook runs at the start of ModifyHostsCertificate; tests use it to
+	// observe whether two writes overlap in time.
+	modifyHook func()
 }
 
 func (f *fakeTEO) DescribeZones(*teo.DescribeZonesRequest) (*teo.DescribeZonesResponse, error) {
@@ -306,6 +322,9 @@ func (f *fakeTEO) DescribeAccelerationDomains(req *teo.DescribeAccelerationDomai
 }
 
 func (f *fakeTEO) ModifyHostsCertificate(req *teo.ModifyHostsCertificateRequest) (*teo.ModifyHostsCertificateResponse, error) {
+	if f.modifyHook != nil {
+		f.modifyHook()
+	}
 	f.modifyReqs = append(f.modifyReqs, req)
 	certID := ""
 	if len(req.ServerCertInfo) > 0 && req.ServerCertInfo[0] != nil {

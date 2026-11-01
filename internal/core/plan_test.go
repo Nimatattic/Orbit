@@ -107,26 +107,27 @@ func TestBuildUpdatePlanKeepsEdgeOneFreeCertWhenConfigured(t *testing.T) {
 	}
 }
 
-func TestBuildUpdatePlanBlocksUnverifiedStrategy(t *testing.T) {
+// The retired "replace" strategy used to be gated behind a CLI flag that could
+// never be reached. It is gone: an unknown strategy value falls back to the
+// product strategy, which is the path that always has an implementation, so no
+// caller can reach an unimplemented write path.
+func TestRetiredReplaceStrategyFallsBackToProduct(t *testing.T) {
+	if got := ChooseStrategy("replace", ProductCDN); got != StrategyProduct {
+		t.Fatalf("replace must fall back to the product strategy, got %s", got)
+	}
 	now := time.Now()
 	certs, resources := planFixture(now)
 
 	plan := BuildUpdatePlan(resources, certs, PlanOptions{
 		Account: "demo", Now: now, Strategy: "replace", EdgeOneReplaceFreeCert: true,
 	})
-	if plan.Count(KindBlocked) == 0 {
-		t.Fatal("S-REPLACE must be blocked without --enable-experimental-write")
+	if plan.ApplyCount() != 2 {
+		t.Fatalf("the fallback strategy must keep both rows executable, got %d", plan.ApplyCount())
 	}
-	if plan.ApplyCount() != 0 {
-		t.Fatalf("blocked changes must not be executable, got %d", plan.ApplyCount())
-	}
-
-	plan = BuildUpdatePlan(resources, certs, PlanOptions{
-		Account: "demo", Now: now, Strategy: "replace", EdgeOneReplaceFreeCert: true, ExperimentalWrite: true,
-	})
-	if plan.Count(KindBlocked) != 0 || plan.ApplyCount() != 2 {
-		t.Fatalf("with the gate open both rows should apply, got blocked=%d apply=%d",
-			plan.Count(KindBlocked), plan.ApplyCount())
+	for _, ch := range plan.Changes {
+		if ch.Kind == KindApply && ch.Strategy != StrategyProduct {
+			t.Fatalf("%s used strategy %s, want product", ch.Domain, ch.Strategy)
+		}
 	}
 }
 

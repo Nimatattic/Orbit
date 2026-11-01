@@ -283,10 +283,18 @@ func (l *limiter) wait(ctx context.Context) error {
 }
 
 // call applies pacing plus bounded exponential backoff with jitter.
+//
+// Both waits go through the limiter's injected sleep function, so a provider
+// wired with a virtual clock (tests) never blocks on real backoff either: the
+// sleep seam is the same one used for pacing.
 func call[T any](ctx context.Context, l *limiter, maxAttempts int, fn func() (T, error)) (T, error) {
 	var zero T
 	if maxAttempts < 1 {
 		maxAttempts = 1
+	}
+	sleep := sleepCtx
+	if l != nil && l.sleep != nil {
+		sleep = l.sleep
 	}
 	for attempt := 1; ; attempt++ {
 		if l != nil {
@@ -303,7 +311,7 @@ func call[T any](ctx context.Context, l *limiter, maxAttempts int, fn func() (T,
 		}
 		backoff := time.Duration(200*(1<<(attempt-1))) * time.Millisecond
 		backoff += time.Duration(rand.Int63n(int64(100 * time.Millisecond)))
-		if err := sleepCtx(ctx, backoff); err != nil {
+		if err := sleep(ctx, backoff); err != nil {
 			return zero, err
 		}
 	}

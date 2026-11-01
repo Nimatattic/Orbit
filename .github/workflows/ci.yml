@@ -1,0 +1,126 @@
+# Continuous integration for Orbit.
+#
+# Everything here runs offline against fakes: the test suite never reaches the
+# network, so no cloud credentials or repository secrets are required.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+# Least privilege by default; the release job raises it for itself below.
+permissions:
+  contents: read
+
+env:
+  GOFLAGS: -mod=mod
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          # go.mod's "go 1.27.1" directive is the single source of truth.
+          # If that patch release is ever withdrawn from go.dev/dl, replace this
+          # block with "go-version: '1.27.x'" and keep the directive as the floor.
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt is required on:"; echo "$unformatted"
+            echo "run 'make fmt' locally to fix"; exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+  build:
+    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The same targets "make release" ships.
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: arm64 }
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build -trimpath ./...
+          go build -trimpath -o /dev/null ./cmd/orbit
+
+  release:
+    name: release
+    # Tags only, and only after the gate above is green.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # make release derives VERSION from "git describe --tags", so the tag
+          # history has to be present.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify the tag is what make release will stamp
+        # "make release" derives VERSION from "git describe --tags"; refuse to
+        # publish binaries that would be labelled v0.0.0-dev.
+        run: |
+          described="$(git describe --tags)"
+          if [ "$described" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::make release would stamp '$described', expected '${GITHUB_REF_NAME}'"
+            exit 1
+          fi
+
+      - name: Build release binaries
+        run: make release
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/orbit-linux-amd64
+            dist/orbit-linux-arm64
+            dist/orbit-darwin-arm64
+          fail_on_unmatched_files: true
+          generate_release_notes: true

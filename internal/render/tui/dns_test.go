@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Crequency/orbit/internal/core"
-	"github.com/Crequency/orbit/internal/i18n"
+	"github.com/Nimatattic/Orbit/internal/core"
+	"github.com/Nimatattic/Orbit/internal/i18n"
 )
 
 // dnsJob builds a job backed by in-memory state, mirroring the real provider.

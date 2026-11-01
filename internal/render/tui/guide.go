@@ -12,7 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/Crequency/orbit/internal/i18n"
+	"github.com/Nimatattic/Orbit/internal/i18n"
 )
 
 // GuidePermission is one CAM action shown by the permission guide.
@@ -22,8 +22,6 @@ type GuidePermission struct {
 	Tier string
 	// Purpose is already localised by the caller.
 	Purpose string
-	// Experimental marks actions only needed by the experimental deploy strategy.
-	Experimental bool
 	// NoGrant marks an API that needs no CAM authorization; it is listed for
 	// completeness but never written into the policy.
 	NoGrant bool
@@ -60,11 +58,13 @@ type GuideJob struct {
 	// empty means "everything / the safest level".
 	InitialProducts []string
 	InitialScope    string
-	// Permissions recomputes the list for the current selection.
-	Permissions func(products []string, scopeID string, experimental bool) []GuidePermission
+	// Permissions recomputes the list for the current selection. It is the same
+	// list the text mode prints: there is one permission table, so nothing has to
+	// be opted into before the guide can show it.
+	Permissions func(products []string, scopeID string) []GuidePermission
 	// PolicyJSON renders the custom policy for the current selection: the text
 	// the operator pastes into the console's "按策略语法创建" editor.
-	PolicyJSON func(products []string, scopeID string, experimental bool) string
+	PolicyJSON func(products []string, scopeID string) string
 	// PolicyName suggests a console name for the current selection.
 	PolicyName func(products []string, scopeID string) string
 	// PolicySteps are the console steps, already localised.
@@ -281,7 +281,7 @@ func (m *guideModel) permissions() []GuidePermission {
 	if m.scope < len(m.job.Scopes) {
 		scope = m.job.Scopes[m.scope].ID
 	}
-	return m.job.Permissions(m.selectedProducts(), scope, false)
+	return m.job.Permissions(m.selectedProducts(), scope)
 }
 
 // View implements tea.Model.
@@ -446,9 +446,6 @@ func (m *guideModel) permissionPanel(width int, perms []GuidePermission) string 
 			purposeWidth = 8
 		}
 		line := tier + " " + action + " " + marker + m.styles.dim.Render(truncate(p.Purpose, purposeWidth))
-		if p.Experimental {
-			line += m.styles.dim.Render(" (" + m.bundle.T("guide.experimental") + ")")
-		}
 		b.WriteString(line)
 		if i < end-1 {
 			b.WriteString("\n")
@@ -478,7 +475,7 @@ func (m *guideModel) policyText() string {
 	if m.scope < len(m.job.Scopes) {
 		scope = m.job.Scopes[m.scope].ID
 	}
-	return m.job.PolicyJSON(m.selectedProducts(), scope, false)
+	return m.job.PolicyJSON(m.selectedProducts(), scope)
 }
 
 // policyLines is the JSON, wrapped to the panel width.

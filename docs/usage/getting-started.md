@@ -23,8 +23,19 @@ make build            # -> bin/orbit
 make install          # -> /usr/local/bin/orbit
 ```
 
-> The Go module path is `github.com/Crequency/orbit`, so `go install` against the
-> GitHub URL does not work yet; use the clone-and-build path.
+`go install` works because the module path matches the repository
+(`github.com/Nimatattic/Orbit`, upper case included — Go paths are case-sensitive):
+
+```bash
+# once a v* tag exists on the repository (see the release workflow in OPERATIONS.md)
+go install github.com/Nimatattic/Orbit/cmd/orbit@latest
+# before the first tag: branch install, or use the clone-and-build path above
+go install github.com/Nimatattic/Orbit/cmd/orbit@main
+```
+
+The result lands in `$(go env GOPATH)/bin/orbit` (or `$GOBIN`). It is the same
+`CGO_ENABLED=0` static binary `make release` produces, with the version taken from the
+tag Go resolved; `make build` additionally stamps the local commit and date.
 
 ## 2. Register an account
 

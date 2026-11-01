@@ -3,7 +3,7 @@ package version
 
 // These values are overridden by the Makefile:
 //
-//	-X github.com/Crequency/orbit/internal/version.Version=...
+//	-X github.com/Nimatattic/Orbit/internal/version.Version=...
 var (
 	// Version is the semantic version or git describe output.
 	Version = "dev"

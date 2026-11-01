@@ -43,12 +43,8 @@ func AuditDir() string { return filepath.Join(Home(), "audit") }
 // BackupsDir returns <home>/backups.
 func BackupsDir() string { return filepath.Join(Home(), "backups") }
 
-// EnsureHome creates the Orbit directories with safe permissions.
-func EnsureHome() error {
-	for _, dir := range []string{Home(), CacheDir(), AuditDir(), BackupsDir()} {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return err
-		}
-	}
-	return nil
-}
+// Directories are created lazily by the writer that needs them (the credential
+// store, the audit logger, the backup writer, config set): every one already
+// calls MkdirAll with 0700. An eager home-directory bootstrap would therefore
+// only add side effects to read-only commands such as `orbit version`, so it was
+// removed instead of wired into Execute.

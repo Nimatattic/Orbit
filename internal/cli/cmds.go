@@ -14,13 +14,13 @@ import (
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 
-	"github.com/Crequency/orbit/internal/config"
-	"github.com/Crequency/orbit/internal/core"
-	"github.com/Crequency/orbit/internal/credential"
-	"github.com/Crequency/orbit/internal/exitcode"
-	"github.com/Crequency/orbit/internal/render/plain"
-	"github.com/Crequency/orbit/internal/tty"
-	"github.com/Crequency/orbit/internal/version"
+	"github.com/Nimatattic/Orbit/internal/config"
+	"github.com/Nimatattic/Orbit/internal/core"
+	"github.com/Nimatattic/Orbit/internal/credential"
+	"github.com/Nimatattic/Orbit/internal/exitcode"
+	"github.com/Nimatattic/Orbit/internal/render/plain"
+	"github.com/Nimatattic/Orbit/internal/tty"
+	"github.com/Nimatattic/Orbit/internal/version"
 )
 
 func (a *App) newVersionCmd() *cobra.Command {
@@ -214,6 +214,31 @@ func (a *App) newAccountCmd() *cobra.Command {
 	return cmd
 }
 
+// accountDTO is the JSON shape of one registered account (status uses the same
+// snake_case style). The secret id is redacted exactly like the table: enough to
+// tell entries apart, useless as a credential.
+type accountDTO struct {
+	Account  string `json:"account"`
+	SecretID string `json:"secret_id"`
+	Source   string `json:"source"`
+}
+
+// accountDTOs projects the registered aliases into their JSON form.
+func (a *App) accountDTOs(aliases []string, creds *credential.Credentials) []accountDTO {
+	out := make([]accountDTO, 0, len(aliases))
+	for _, alias := range aliases {
+		dto := accountDTO{Account: alias, Source: "store"}
+		if stored, ok := creds.Accounts[alias]; ok {
+			dto.SecretID = credential.Redact(stored.SecretID)
+		}
+		if acc, ok := a.Loaded.Config.Account(DefaultPlatform, alias); ok && acc.Credential.Source != "" {
+			dto.Source = acc.Credential.Source
+		}
+		out = append(out, dto)
+	}
+	return out
+}
+
 func (a *App) newAccountListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
@@ -224,19 +249,19 @@ func (a *App) newAccountListCmd() *cobra.Command {
 				return err
 			}
 			aliases := a.knownAliases()
+			if a.JSON {
+				// An empty registry is [] rather than a prose line, so that
+				// `orbit account list --json | jq` keeps working.
+				return a.jsonOut(a.accountDTOs(aliases, creds))
+			}
 			if len(aliases) == 0 {
 				fmt.Fprintln(a.Out, a.Bundle.T("account.none"))
 				return nil
 			}
 			tw := tabwriter.NewWriter(a.Out, 2, 4, 2, ' ', 0)
 			fmt.Fprintf(tw, "%s\t%s\t%s\n", a.Bundle.T("account.header"), a.Bundle.T("account.header_secret"), "Source")
-			for _, alias := range aliases {
-				stored := creds.Accounts[alias]
-				source := "store"
-				if acc, ok := a.Loaded.Config.Account(DefaultPlatform, alias); ok && acc.Credential.Source != "" {
-					source = acc.Credential.Source
-				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\n", alias, credential.Redact(stored.SecretID), source)
+			for _, dto := range a.accountDTOs(aliases, creds) {
+				fmt.Fprintf(tw, "%s\t%s\t%s\n", dto.Account, dto.SecretID, dto.Source)
 			}
 			tw.Flush()
 			return nil
@@ -245,7 +270,7 @@ func (a *App) newAccountListCmd() *cobra.Command {
 }
 
 func (a *App) newAccountAddCmd() *cobra.Command {
-	var alias, idEnv string
+	var alias string
 	var fromStdin, force bool
 	cmd := &cobra.Command{
 		Use:   "add",
@@ -270,8 +295,6 @@ func (a *App) newAccountAddCmd() *cobra.Command {
 
 			var secretID, secretKey string
 			switch {
-			case idEnv != "":
-				return exitcode.New(exitcode.Fatal, "err.account_needs_input")
 			case fromStdin:
 				reader := bufio.NewReader(a.In)
 				line1, err := reader.ReadString('\n')
@@ -319,7 +342,6 @@ func (a *App) newAccountAddCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&alias, "alias", "", "account alias")
-	cmd.Flags().StringVar(&idEnv, "secret-id-env", "", "")
 	cmd.Flags().BoolVar(&fromStdin, "from-stdin", false, "read SecretId and SecretKey from stdin (two lines)")
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite an existing account")
 	return cmd
@@ -367,9 +389,16 @@ func (a *App) newAccountTestCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			failed := false
+			// One document per account so a multi-account run stays parseable.
+			type accountChecks struct {
+				Account string     `json:"account"`
+				Checks  []checkDTO `json:"checks"`
+			}
+			var (
+				report []accountChecks
+				failed bool
+			)
 			for _, alias := range targets {
-				fmt.Fprintf(a.Out, "%s %s\n", a.Bundle.T("account.header"), alias)
 				provider, err := a.providerFor(alias)
 				if err != nil {
 					return err
@@ -378,16 +407,29 @@ func (a *App) newAccountTestCmd() *cobra.Command {
 				if err != nil {
 					return a.mapProviderErr(err, provider.Name())
 				}
-				wanted := splitList(a.Products)
-				checks = filterChecks(checks, wanted)
-				plain.Checks(a.Out, a.Bundle, checks)
+				checks = filterChecks(checks, splitList(a.Products))
 				for _, c := range checks {
 					if c.Status == core.CheckFail {
 						failed = true
 					}
 				}
+				if a.JSON {
+					report = append(report, accountChecks{Account: alias, Checks: checkDTOs(checks)})
+					continue
+				}
+				fmt.Fprintf(a.Out, "%s %s\n", a.Bundle.T("account.header"), alias)
+				plain.Checks(a.Out, a.Bundle, checks)
+			}
+			if a.JSON {
+				if report == nil {
+					report = []accountChecks{}
+				}
+				if err := a.jsonOut(report); err != nil {
+					return err
+				}
 			}
 			if failed {
+				// The exit code contract is unchanged by --json.
 				return exitcode.New(exitcode.Partial, "msg.partial")
 			}
 			return nil
@@ -397,6 +439,31 @@ func (a *App) newAccountTestCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&a.AllAccounts, "all-accounts", false, "")
 	cmd.Flags().StringVar(&a.Products, "products", "", "")
 	return cmd
+}
+
+// checkDTO is the JSON shape of one preflight or doctor check. It carries the
+// message key instead of its translation so --json stays language independent
+// (decision B5).
+type checkDTO struct {
+	Key        string `json:"key"`
+	Status     string `json:"status"`
+	Detail     string `json:"detail,omitempty"`
+	MessageKey string `json:"message_key,omitempty"`
+	Error      string `json:"error,omitempty"`
+}
+
+// checkDTOs projects checks into their JSON form. The slice is never nil so an
+// empty result marshals as [] rather than null.
+func checkDTOs(checks []core.Check) []checkDTO {
+	out := make([]checkDTO, 0, len(checks))
+	for _, c := range checks {
+		dto := checkDTO{Key: c.Key, Status: string(c.Status), Detail: c.Detail, MessageKey: c.MessageKey}
+		if c.Err != nil {
+			dto.Error = c.Err.Error()
+		}
+		out = append(out, dto)
+	}
+	return out
 }
 
 // filterChecks keeps credential/role checks and only the requested products.
@@ -427,8 +494,10 @@ func (a *App) newDoctorCmd() *cobra.Command {
 			fmt.Fprintln(a.Out, a.Bundle.T("doctor.title"))
 			plain.Checks(a.Out, a.Bundle, checks)
 			for _, c := range checks {
-				if c.Status == "fail" {
-					return exitcode.New(exitcode.Partial, "msg.partial")
+				// A failed check is a fatal environment problem, not a partial
+				// run: exit 1 as documented (warnings stay exit 0).
+				if c.Status == core.CheckFail {
+					return exitcode.New(exitcode.Fatal, "msg.partial")
 				}
 			}
 			return nil

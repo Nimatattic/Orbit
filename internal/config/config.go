@@ -39,16 +39,15 @@ type Config struct {
 
 // Defaults holds cross-account settings.
 type Defaults struct {
-	Platforms         []string    `yaml:"platforms"`
-	Products          []string    `yaml:"products"`
-	Strategy          string      `yaml:"strategy"`
-	Concurrency       Concurrency `yaml:"concurrency"`
-	Timeouts          Timeouts    `yaml:"timeouts"`
-	CertPreference    []string    `yaml:"cert_preference"`
-	DomainMatch       DomainMatch `yaml:"domain_match"`
-	ExperimentalWrite bool        `yaml:"experimental_write"`
-	EdgeOne           EdgeOne     `yaml:"edgeone"`
-	Clean             Clean       `yaml:"clean"`
+	Platforms      []string    `yaml:"platforms"`
+	Products       []string    `yaml:"products"`
+	Strategy       string      `yaml:"strategy"`
+	Concurrency    Concurrency `yaml:"concurrency"`
+	Timeouts       Timeouts    `yaml:"timeouts"`
+	CertPreference []string    `yaml:"cert_preference"`
+	DomainMatch    DomainMatch `yaml:"domain_match"`
+	EdgeOne        EdgeOne     `yaml:"edgeone"`
+	Clean          Clean       `yaml:"clean"`
 }
 
 // Concurrency bounds parallel work.
@@ -386,7 +385,6 @@ func Keys() []string {
 		"defaults.cert_preference",
 		"defaults.domain_match.wildcard",
 		"defaults.domain_match.allow_expired",
-		"defaults.experimental_write",
 		"defaults.edgeone.replace_free_cert",
 		"defaults.clean.older_than",
 		"defaults.clean.require_full_evidence",
@@ -447,7 +445,6 @@ func applyDefaults(m map[string]any) {
 	setDefault(m, []string{"defaults", "cert_preference"}, []string{"upload", "buy"})
 	setDefault(m, []string{"defaults", "domain_match", "wildcard"}, true)
 	setDefault(m, []string{"defaults", "domain_match", "allow_expired"}, false)
-	setDefault(m, []string{"defaults", "experimental_write"}, false)
 	setDefault(m, []string{"defaults", "edgeone", "replace_free_cert"}, true)
 	setDefault(m, []string{"defaults", "clean", "older_than"}, "7d")
 	setDefault(m, []string{"defaults", "clean", "require_full_evidence"}, true)

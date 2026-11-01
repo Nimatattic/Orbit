@@ -26,8 +26,15 @@ The repository ships three generated policies, sourced from the same table the g
 | File | Actions | Use it for |
 | --- | --- | --- |
 | [`docs/cam/readonly.json`](../cam/readonly.json) | 10 | inspection machine, `--dry-run` |
-| [`docs/cam/execute.json`](../cam/execute.json) | 15 | apply certificates and records |
-| [`docs/cam/delete.json`](../cam/delete.json) | 19 | apply **and** delete |
+| [`docs/cam/execute.json`](../cam/execute.json) | 17 | apply certificates and records (every strategy, `deploy` included) |
+| [`docs/cam/delete.json`](../cam/delete.json) | 21 | apply **and** delete |
+
+The execute/delete policies gained two actions when `deploy` stopped being an
+experimental path: `ssl:DeployCertificateInstance` (the deploy write) and
+`ssl:DescribeHostDeployRecord` (polling the deploy record). **If you generated a custom
+policy before that and run `--strategy=deploy`, add both actions** — otherwise every
+deploy write comes back `UnauthorizedOperation`. `readonly.json` did not change:
+planning a deploy needs no extra read permission.
 
 They are generated — do not hand-edit. Change the table and regenerate:
 
@@ -106,7 +113,7 @@ it cannot be proven read-only; the first write verifies it for real.
 
 ```bash
 orbit account test --accounts=main            # per product: SSL, CDN, EdgeOne, DNSPod
-orbit account test --accounts=main --json | jq '.[] | select(.status!="ok")'
+orbit account test --accounts=main --json | jq '.[] | .checks[] | select(.status!="ok")'
 orbit dns zones --accounts=main               # cheapest DNS read
 ```
 

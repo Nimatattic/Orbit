@@ -10,21 +10,29 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 
 	"golang.org/x/text/language"
 
-	"github.com/Crequency/orbit/locales"
+	"github.com/Nimatattic/Orbit/locales"
 )
 
 // Fallback is used when nothing else matches (decision B5).
 const Fallback = "zh-CN"
 
 // Bundle renders messages for one resolved language.
+//
+// A bundle is safe for concurrent use: the catalogs are immutable once New has
+// filled them, and the missing-key ledger is guarded by mu.
 type Bundle struct {
 	lang     string
 	msgs     map[string]string
 	fallback map[string]string
-	missing  map[string]struct{}
+
+	// mu guards missing. Providers report progress from worker goroutines, so
+	// several callers can hit an unknown key at the same time.
+	mu      sync.Mutex
+	missing map[string]struct{}
 }
 
 // Supported reports the languages compiled into this binary.
@@ -116,9 +124,9 @@ func (b *Bundle) T(key string, kv ...any) string {
 	tmpl, ok := b.msgs[key]
 	if !ok {
 		if tmpl, ok = b.fallback[key]; ok {
-			b.missing[key] = struct{}{}
+			b.recordMissing(key)
 		} else {
-			b.missing[key] = struct{}{}
+			b.recordMissing(key)
 			return key
 		}
 	}
@@ -133,8 +141,20 @@ func (b *Bundle) T(key string, kv ...any) string {
 	return tmpl
 }
 
+// recordMissing notes a key that needed the fallback catalog or was absent.
+func (b *Bundle) recordMissing(key string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.missing == nil {
+		b.missing = map[string]struct{}{}
+	}
+	b.missing[key] = struct{}{}
+}
+
 // Missing lists keys that were requested but absent (used by doctor and tests).
 func (b *Bundle) Missing() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	out := make([]string, 0, len(b.missing))
 	for k := range b.missing {
 		out = append(out, k)

@@ -10,15 +10,16 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/Crequency/orbit/internal/cloud"
-	"github.com/Crequency/orbit/internal/core"
-	"github.com/Crequency/orbit/internal/i18n"
+	"github.com/Nimatattic/Orbit/internal/cloud"
+	"github.com/Nimatattic/Orbit/internal/core"
+	"github.com/Nimatattic/Orbit/internal/i18n"
 )
 
 // Item is one row of the run: a change that will be written, or a deletion.
@@ -105,6 +106,11 @@ type Model struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	// done is closed when the program leaves the terminal; it releases the
+	// goroutine blocked in pumpEvents (the provider's channel is never closed).
+	done     chan struct{}
+	stopOnce sync.Once
+
 	phase      phase
 	rows       []*row
 	byKey      map[string]*row
@@ -133,6 +139,7 @@ func newModel(ctx context.Context, cancel context.CancelFunc, bundle *i18n.Bundl
 		events:  events,
 		ctx:     ctx,
 		cancel:  cancel,
+		done:    make(chan struct{}),
 		phase:   phaseScanning,
 		byKey:   map[string]*row{},
 		started: time.Now(),
@@ -151,14 +158,32 @@ func tickEvery(d time.Duration) tea.Cmd {
 }
 
 // pumpEvents forwards provider progress events into the UI.
+//
+// Every received event schedules the next pump, so a blocked pump outlives the
+// program unless something releases it. The provider channel is owned by the
+// caller and never closed (see App.progressSink), therefore each pump also watches
+// done and the run context: quitting the TUI must not leak one goroutine per
+// progress event.
 func (m *Model) pumpEvents() tea.Cmd {
 	return func() tea.Msg {
-		ev, ok := <-m.events
-		if !ok {
+		select {
+		case <-m.done:
 			return eventsClosedMsg{}
+		case <-m.ctx.Done():
+			return eventsClosedMsg{}
+		case ev, ok := <-m.events:
+			if !ok {
+				return eventsClosedMsg{}
+			}
+			return progressMsg{event: ev}
 		}
-		return progressMsg{event: ev}
 	}
+}
+
+// stopPump releases the goroutine parked in pumpEvents. It is idempotent and is
+// called once the program has left the terminal.
+func (m *Model) stopPump() {
+	m.stopOnce.Do(func() { close(m.done) })
 }
 
 func (m *Model) runScan() tea.Cmd {
@@ -297,21 +322,28 @@ func (m *Model) pendingKeys() []string {
 }
 
 // applyProgress folds one provider event into the UI state.
+//
+// Rows are keyed by (product, domain) while events mostly report a domain only,
+// so matching is deliberately loose: an event that carries a product narrows the
+// match to that product (the same hostname may be managed by both CDN and
+// EdgeOne), and an event without one falls back to the domain alone.
 func (m *Model) applyProgress(ev cloud.Progress) {
 	m.eventsSeen++
+	product := argString(ev.Args, "product")
+	domains := argString(ev.Args, "domain")
 	switch ev.Key {
 	case "progress.apply.item":
-		m.markTargets(argString(ev.Args, "domain"), stateSubmitting)
+		m.markTargets(product, domains, stateSubmitting)
 	case "progress.apply.verifying":
-		m.markTargets(argString(ev.Args, "domain"), stateWaiting)
+		m.markTargets(product, domains, stateWaiting)
 	case "progress.apply.verified":
-		m.markTargets(argString(ev.Args, "domain"), stateVerified)
+		m.markTargets(product, domains, stateVerified)
 	case "progress.apply.unverified":
-		m.markTargets(argString(ev.Args, "domain"), stateUnverified)
-		m.setStateText(argString(ev.Args, "domain"), argString(ev.Args, "state"))
+		m.markTargets(product, domains, stateUnverified)
+		m.setStateText(product, domains, argString(ev.Args, "state"))
 	case "progress.apply.failed":
-		m.markTargets(argString(ev.Args, "domain"), stateFailed)
-		m.setStateText(argString(ev.Args, "domain"), argString(ev.Args, "code"))
+		m.markTargets(product, domains, stateFailed)
+		m.setStateText(product, domains, argString(ev.Args, "code"))
 	case "progress.apply.summary", "progress.delete.group":
 		// Counters are derived from the rows; nothing to do.
 	default:
@@ -325,36 +357,52 @@ func (m *Model) applyProgress(ev cloud.Progress) {
 	}
 }
 
-// markTargets updates every row whose domain appears in a (possibly batched) list.
-func (m *Model) markTargets(domains string, state itemState) {
+// markTargets updates every row addressed by an event whose domain argument is a
+// (possibly batched, comma separated) list. product may be empty.
+func (m *Model) markTargets(product, domains string, state itemState) {
 	for _, name := range strings.Split(domains, ",") {
 		name = strings.TrimSpace(name)
 		if name == "" {
 			continue
 		}
 		for _, r := range m.rows {
-			if strings.EqualFold(r.item.Domain, name) {
-				r.state = state
-				if state == stateWaiting || state == stateSubmitting {
-					r.since = time.Now()
-				}
+			if !m.addressed(r, product, name) {
+				continue
+			}
+			r.state = state
+			if state == stateWaiting || state == stateSubmitting {
+				r.since = time.Now()
 			}
 		}
 	}
 }
 
-func (m *Model) setStateText(domains, text string) {
+// setStateText attaches a detail (cloud state or error code) to the rows an event
+// addresses.
+func (m *Model) setStateText(product, domains, text string) {
 	if text == "" {
 		return
 	}
 	for _, name := range strings.Split(domains, ",") {
 		name = strings.TrimSpace(name)
 		for _, r := range m.rows {
-			if strings.EqualFold(r.item.Domain, name) {
+			if m.addressed(r, product, name) {
 				r.detail = text
 			}
 		}
 	}
+}
+
+// addressed reports whether one event addresses r. An empty product means the
+// event carried no product and therefore matches on the domain alone.
+func (m *Model) addressed(r *row, product, domain string) bool {
+	if !strings.EqualFold(r.item.Domain, domain) {
+		return false
+	}
+	if product == "" {
+		return true
+	}
+	return strings.EqualFold(r.item.Product, product)
 }
 
 // finishFromResults reconciles rows with the authoritative results.

@@ -5,12 +5,84 @@ package plain
 import (
 	"fmt"
 	"io"
-	"text/tabwriter"
+	"strings"
 	"time"
 
-	"github.com/Crequency/orbit/internal/core"
-	"github.com/Crequency/orbit/internal/i18n"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/Nimatattic/Orbit/internal/core"
+	"github.com/Nimatattic/Orbit/internal/i18n"
 )
+
+// Table geometry. These mirror the tabwriter configuration these tables used to
+// be built with -- tabwriter.NewWriter(w, 2, 4, 2, ' ', 0) -- so switching to
+// display-width alignment does not move any column by a single space.
+const (
+	// tableMinWidth is tabwriter's minwidth: the smallest cell width, padding
+	// included.
+	tableMinWidth = 4
+	// tablePadding is tabwriter's padding: the gap between two columns.
+	tablePadding = 2
+)
+
+// table accumulates cells and renders them aligned by display width.
+//
+// text/tabwriter counts runes, which misaligns every table whose non-final column
+// holds CJK text: a two-character Chinese header occupies four terminal cells but
+// counts as two, so the following columns drift left. Measuring cells with
+// lipgloss.Width fixes the columns while keeping the previous gap.
+type table struct {
+	rows [][]string
+}
+
+// add appends one row of cells.
+func (t *table) add(cells ...string) {
+	t.rows = append(t.rows, cells)
+}
+
+// render writes the accumulated rows. Only the last cell of a row stays
+// unpadded, matching tabwriter (no trailing blanks).
+func (t *table) render(w io.Writer) {
+	if len(t.rows) == 0 {
+		return
+	}
+	columns := 0
+	for _, row := range t.rows {
+		if len(row) > columns {
+			columns = len(row)
+		}
+	}
+	widths := make([]int, columns)
+	for _, row := range t.rows {
+		for i, cell := range row {
+			if n := lipgloss.Width(cell); n > widths[i] {
+				widths[i] = n
+			}
+		}
+	}
+	for i, content := range widths {
+		cell := content + tablePadding
+		if cell < tableMinWidth {
+			cell = tableMinWidth
+		}
+		widths[i] = cell
+	}
+
+	var b strings.Builder
+	for _, row := range t.rows {
+		for i, cell := range row {
+			b.WriteString(cell)
+			if i == len(row)-1 {
+				break
+			}
+			if gap := widths[i] - lipgloss.Width(cell); gap > 0 {
+				b.WriteString(strings.Repeat(" ", gap))
+			}
+		}
+		b.WriteString("\n")
+	}
+	io.WriteString(w, b.String())
+}
 
 // Plan renders an update plan.
 func Plan(w io.Writer, b *i18n.Bundle, plan core.Plan) {
@@ -19,16 +91,14 @@ func Plan(w io.Writer, b *i18n.Bundle, plan core.Plan) {
 		fmt.Fprintln(w, "  "+b.T("plan.empty"))
 		return
 	}
-	tw := tabwriter.NewWriter(w, 2, 4, 2, ' ', 0)
-	fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-		b.T("plan.col.product"), b.T("plan.col.resource"), b.T("plan.col.domain"),
+	tbl := &table{}
+	tbl.add("  "+b.T("plan.col.product"), b.T("plan.col.resource"), b.T("plan.col.domain"),
 		b.T("plan.col.from"), b.T("plan.col.to"), b.T("plan.col.action"), b.T("plan.col.risk"))
 	for _, ch := range plan.Changes {
-		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			string(ch.Product), ch.ResourceName, ch.Domain,
+		tbl.add("  "+string(ch.Product), ch.ResourceName, ch.Domain,
 			certLabel(ch.From), certLabel(ch.To), b.T(actionKey(ch.Kind)), b.T(riskKey(ch.Risk)))
 	}
-	tw.Flush()
+	tbl.render(w)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  "+b.T("plan.summary",
 		"total", len(plan.Changes),
@@ -50,26 +120,26 @@ func CleanPlan(w io.Writer, b *i18n.Bundle, plan core.CleanPlan) {
 		fmt.Fprintln(w, "  "+b.T("msg.nothing_to_do"))
 	} else {
 		fmt.Fprintln(w, "  "+b.T("clean.candidates", "count", len(plan.Candidates)))
-		tw := tabwriter.NewWriter(w, 2, 4, 2, ' ', 0)
-		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", "ID", "Alias", "Expires", "Superseded by")
+		tbl := &table{}
+		tbl.add("  ID", "Alias", "Expires", "Superseded by")
 		for _, c := range plan.Candidates {
-			fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", c.Cert.ID, c.Cert.Alias, date(c.Cert.NotAfter), c.SupersededBy)
+			tbl.add("  "+c.Cert.ID, c.Cert.Alias, date(c.Cert.NotAfter), c.SupersededBy)
 		}
-		tw.Flush()
+		tbl.render(w)
 	}
 	if len(plan.Skipped) > 0 {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "  "+b.T("clean.skipped", "count", len(plan.Skipped)))
-		tw := tabwriter.NewWriter(w, 2, 4, 2, ' ', 0)
+		tbl := &table{}
 		for _, s := range plan.Skipped {
-			fmt.Fprintf(tw, "  %s\t%s\t%s\n", s.Cert.ID, s.Cert.Alias, b.T(s.Reason))
+			tbl.add("  "+s.Cert.ID, s.Cert.Alias, b.T(s.Reason))
 		}
-		tw.Flush()
+		tbl.render(w)
 	}
 }
 
 func Checks(w io.Writer, b *i18n.Bundle, checks []core.Check) {
-	tw := tabwriter.NewWriter(w, 2, 4, 2, ' ', 0)
+	tbl := &table{}
 	for _, c := range checks {
 		detail := c.Detail
 		if c.MessageKey != "" {
@@ -81,15 +151,15 @@ func Checks(w io.Writer, b *i18n.Bundle, checks []core.Check) {
 		if detail == "" && c.Err != nil {
 			detail = c.Err.Error()
 		}
-		fmt.Fprintf(tw, "  [%s]\t%s\t%s\n", statusLabel(b, c.Status), b.T(c.Key), detail)
+		tbl.add("  ["+statusLabel(b, c.Status)+"]", b.T(c.Key), detail)
 	}
-	tw.Flush()
+	tbl.render(w)
 }
 
 // Results renders execution results and returns the number of failures.
 func Results(w io.Writer, b *i18n.Bundle, results []core.Result) int {
 	failed := 0
-	tw := tabwriter.NewWriter(w, 2, 4, 2, ' ', 0)
+	tbl := &table{}
 	for _, r := range results {
 		state := "ok"
 		if !r.OK {
@@ -115,9 +185,9 @@ func Results(w io.Writer, b *i18n.Bundle, results []core.Result) int {
 		if r.ErrCode != "" {
 			detail = r.ErrCode + " " + detail
 		}
-		fmt.Fprintf(tw, "  [%s]\t%s\t%s\t%s\t%s\n", state, string(r.Change.Product), r.Change.Domain, target, detail)
+		tbl.add("  ["+state+"]", string(r.Change.Product), r.Change.Domain, target, detail)
 	}
-	tw.Flush()
+	tbl.render(w)
 	return failed
 }
 
@@ -159,8 +229,6 @@ func actionKey(kind core.ChangeKind) string {
 		return "action.uptodate"
 	case core.KindForeign:
 		return "action.foreign"
-	case core.KindBlocked:
-		return "action.blocked"
 	case core.KindNoCert:
 		return "action.nocert"
 	default:
