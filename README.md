@@ -286,6 +286,11 @@ orbit dns rm example.com 12 --yes
 orbit dns check example.com www CNAME             # is it live in public DNS?
 ```
 
+With several accounts registered, `dns ls <zone>` queries them all and **skips the ones
+that do not host the zone** (DNSPod answers `OperationDenied.NoPermissionToOperateDomain`,
+which is an ownership fact, not a permission problem). Pass `--accounts=<alias>` to query a
+single account.
+
 `dns set` is **idempotent**: it matches by (name, type), so the same command in cron
 skips an identical record, updates a changed one, and creates a missing one. Writes are
 dry-run unless `--yes` is given, every change is read back, and every change lands in the

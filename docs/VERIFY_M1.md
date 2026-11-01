@@ -329,6 +329,8 @@ Orbit · 应用证书 · main                                       12s
 | 多值记录 | 同名同类型存在多条时 `set` 拒绝并要求 `--record-id`，不会误改 |
 | 账号歧义 | 多账号下写操作要求 `--accounts`，否则退出码 4 |
 | TUI | `orbit dns` 可切换域名、`n` 新建、`e` 编辑、`d` 删除（需 `y` 确认）、空格启停、`/` 过滤 |
+| 多账号 | `dns ls <域名>` 跳过不托管该域名的账号并给出提示；全部账号都不托管时退出码 1（`dns.zone_not_hosted`）；真正的权限错误仍为退出码 2 |
+| DNS 探针 | `orbit account test` 会多出一行「云解析 DNS」，单独反映 `dnspod:DescribeDomainList` 是否可用 |
 
 ## 总控台（`orbit dash`）
 

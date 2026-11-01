@@ -14,6 +14,7 @@ import (
 
 	"github.com/Crequency/orbit/internal/audit"
 	"github.com/Crequency/orbit/internal/cloud"
+	"github.com/Crequency/orbit/internal/cloud/tencent"
 	"github.com/Crequency/orbit/internal/core"
 	"github.com/Crequency/orbit/internal/exitcode"
 	"github.com/Crequency/orbit/internal/render/tui"
@@ -81,6 +82,22 @@ func (a *App) dnsTargets() ([]string, error) {
 		return nil, exitcode.New(exitcode.Fatal, "err.no_accounts")
 	}
 	return aliases, nil
+}
+
+// describeProviderError renders a cloud error the way the DNS commands report it:
+// the translated hint when the code is known, the raw error otherwise.
+func (a *App) describeProviderError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if key := tencent.MessageKey(err); key != "" && key != tencent.MsgUnknown {
+		code := tencent.Code(err)
+		if code == "" {
+			return a.Bundle.T(key)
+		}
+		return a.Bundle.T(key) + " (" + code + ")"
+	}
+	return a.userError(err).Error()
 }
 
 // dnsProvider returns the DNS capability of one account's provider.
@@ -230,13 +247,13 @@ func (a *App) runDNSZones(ctx context.Context) error {
 	for _, account := range targets {
 		dns, err := a.dnsProvider(account)
 		if err != nil {
-			fmt.Fprintln(a.Err, a.Bundle.T("dns.account_failed", "account", account, "error", a.userError(err)))
+			fmt.Fprintln(a.Err, a.Bundle.T("dns.account_failed", "account", account, "error", a.describeProviderError(err)))
 			failures++
 			continue
 		}
 		zones, err := dns.ListZones(ctx, account)
 		if err != nil {
-			fmt.Fprintln(a.Err, a.Bundle.T("dns.account_failed", "account", account, "error", a.userError(err)))
+			fmt.Fprintln(a.Err, a.Bundle.T("dns.account_failed", "account", account, "error", a.describeProviderError(err)))
 			failures++
 			continue
 		}
@@ -296,21 +313,36 @@ func (a *App) runDNSList(ctx context.Context, zone string) error {
 	filter := core.DNSRecordFilter{Type: a.DNSFilterType, Name: a.DNSFilterName, Keyword: a.DNSFilterKeyword}
 
 	var all []core.DNSRecord
+	var notHosted []string
 	failures := 0
 	for _, account := range targets {
 		dns, err := a.dnsProvider(account)
 		if err != nil {
-			fmt.Fprintln(a.Err, a.Bundle.T("dns.account_failed", "account", account, "error", a.userError(err)))
+			fmt.Fprintln(a.Err, a.Bundle.T("dns.account_failed", "account", account, "error", a.describeProviderError(err)))
 			failures++
 			continue
 		}
 		records, err := dns.ListRecords(ctx, account, zone)
 		if err != nil {
-			fmt.Fprintln(a.Err, a.Bundle.T("dns.account_failed", "account", account, "error", a.userError(err)))
+			// "This domain is not yours" means the zone lives elsewhere: an
+			// expected answer when several accounts are in play, not a failure.
+			if tencent.Code(err) == tencent.CodeDNSDomainNotOwned {
+				notHosted = append(notHosted, account)
+				continue
+			}
+			fmt.Fprintln(a.Err, a.Bundle.T("dns.account_failed", "account", account, "error", a.describeProviderError(err)))
 			failures++
 			continue
 		}
 		all = append(all, core.FilterDNSRecords(records, filter)...)
+	}
+	if len(all) == 0 && failures == 0 && len(notHosted) > 0 {
+		return exitcode.New(exitcode.Fatal, "dns.zone_not_hosted",
+			"zone", zone, "accounts", strings.Join(notHosted, ", "))
+	}
+	if len(notHosted) > 0 && len(all) > 0 {
+		fmt.Fprintln(a.Err, a.Bundle.T("dns.not_hosted_hint",
+			"zone", zone, "accounts", strings.Join(notHosted, ", ")))
 	}
 	sort.SliceStable(all, func(i, j int) bool {
 		if all[i].Name != all[j].Name {

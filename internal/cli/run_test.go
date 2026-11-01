@@ -31,6 +31,7 @@ type stubProvider struct {
 	// DNS state, used by the DNS command tests.
 	dnsZones   []core.DNSZone
 	dnsRecords map[string][]core.DNSRecord
+	dnsListErr map[string]error
 	dnsNextID  uint64
 	dnsCreates int
 	dnsUpdates int
@@ -44,7 +45,10 @@ func (s *stubProvider) ListZones(context.Context, string) ([]core.DNSZone, error
 	return s.dnsZones, nil
 }
 
-func (s *stubProvider) ListRecords(_ context.Context, _ string, zone string) ([]core.DNSRecord, error) {
+func (s *stubProvider) ListRecords(_ context.Context, account string, zone string) ([]core.DNSRecord, error) {
+	if err := s.dnsListErr[account]; err != nil {
+		return nil, err
+	}
 	return s.dnsRecords[zone], nil
 }
 

@@ -36,6 +36,7 @@ const (
 	MsgEvidenceIncomplete = "cloud.err.evidence_incomplete"
 	MsgCDNConfigRejected  = "cloud.err.cdn_config_rejected"
 	MsgCDNDomainDisabled  = "cloud.err.cdn_domain_disabled"
+	MsgDNSDomainNotOwned  = "cloud.err.dns_domain_not_owned"
 )
 
 // retryableCodes are cloud error codes worth retrying: transient limits and
@@ -52,6 +53,10 @@ var retryableCodes = map[string]bool{
 	"UnauthorizedOperation.OperationTooOften":             true,
 	"FailedOperation.CertificateHostResourceInstanceHuge": false, // deterministic, not transient
 }
+
+// CodeDNSDomainNotOwned is DNSPod's "this domain is not yours" answer. It is not a
+// CAM failure: the API key is fine, the zone simply lives in another account.
+const CodeDNSDomainNotOwned = "OperationDenied.NoPermissionToOperateDomain"
 
 // messageKeys maps a Tencent Cloud error code to an actionable message key.
 var messageKeys = map[string]string{
@@ -77,6 +82,7 @@ var messageKeys = map[string]string{
 	"ResourceUnavailable.ZoneNotFound":                     MsgNotFound,
 	"ResourceUnavailable.CdnHostNoIcp":                     MsgNoICP,
 	"FailedOperation.CdnConfigError":                       MsgCDNConfigRejected,
+	CodeDNSDomainNotOwned:                                  MsgDNSDomainNotOwned,
 	"InvalidParameter.CdnHostInvalidStatus":                MsgCDNConfigRejected,
 	"InvalidParameter.CDNStatusInvalidDomain":              MsgCDNConfigRejected,
 	"InvalidParameter.AccessPortOpenedHttps":               MsgCDNConfigRejected,

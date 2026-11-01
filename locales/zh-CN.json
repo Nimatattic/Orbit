@@ -441,5 +441,9 @@
   "perm.dns.toggle": "启用/停用解析记录",
   "perm.dns.delete": "删除解析记录",
   "guide.product.dns": "DNS 解析（DNSPod）",
-  "dns.tui.key_apply": "应用过滤"
+  "dns.tui.key_apply": "应用过滤",
+  "cloud.err.dns_domain_not_owned": "该域名不在当前账号的 DNSPod 下（域名无权限）；请用 --accounts 指定拥有它的账号，或确认域名已托管在 DNSPod",
+  "cloud.check.dnspod": "云解析 DNS",
+  "dns.zone_not_hosted": "{zone} 不在这些账号的 DNSPod 下：{accounts}",
+  "dns.not_hosted_hint": "提示：{zone} 不在 {accounts} 的 DNSPod 下，已跳过（可用 --accounts 只查指定账号）"
 }

@@ -30,6 +30,7 @@ import (
 
 	"github.com/Crequency/orbit/internal/cloud"
 	"github.com/Crequency/orbit/internal/core"
+	dnspod "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/dnspod/v20210323"
 )
 
 // Provider is the Tencent Cloud implementation of cloud.Provider.
@@ -166,6 +167,17 @@ func (p *Provider) Preflight(ctx context.Context, _ string) ([]core.Check, error
 		})
 		return err
 	})
+
+	if p.dnspod != nil {
+		probe("cloud.check.dnspod", "dnspod:DescribeDomainList", func() error {
+			req := dnspod.NewDescribeDomainListRequest()
+			req.Limit = common.Int64Ptr(1)
+			_, err := call(ctx, p.limiter("dns"), p.opts.MaxAttempts, func() (*dnspod.DescribeDomainListResponse, error) {
+				return p.dnspod.DescribeDomainList(req)
+			})
+			return err
+		})
+	}
 
 	checks = append(checks, core.Check{
 		Key:    "cloud.check.service_role",

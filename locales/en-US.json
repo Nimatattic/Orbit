@@ -441,5 +441,9 @@
   "perm.dns.toggle": "enable/disable DNS records",
   "perm.dns.delete": "delete DNS records",
   "guide.product.dns": "DNS (DNSPod)",
-  "dns.tui.key_apply": "apply"
+  "dns.tui.key_apply": "apply",
+  "cloud.err.dns_domain_not_owned": "this domain is not in the account's DNSPod (no permission to operate it); pass --accounts with the owning account, or confirm the domain is hosted at DNSPod",
+  "cloud.check.dnspod": "DNSPod",
+  "dns.zone_not_hosted": "{zone} is not hosted by any of these accounts: {accounts}",
+  "dns.not_hosted_hint": "note: {zone} is not in DNSPod for {accounts}; skipped (use --accounts to query one account)"
 }

@@ -185,6 +185,11 @@ orbit dns check example.com _acme-challenge TXT
 ```
 
 每次写入都会回读确认并写审计（`action: dns.create|update|delete`）。
+
+多账号时 `orbit dns ls <域名>` 会逐个账号查询，**不托管该域名的账号会被跳过**并提示
+（DNSPod 返回 `OperationDenied.NoPermissionToOperateDomain`，这是域名归属问题，
+不是 CAM 授权问题）。只想查一个账号时用 `--accounts=<别名>`。
+`orbit account test` 现在也会探测 `dnspod:DescribeDomainList`，用于单独确认 DNS 权限。
 多值（轮询）同名记录不会被猜测覆盖，需用 `--record-id` 指定。
 
 ## 7. 日常查看
