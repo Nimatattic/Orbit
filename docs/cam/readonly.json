@@ -5,6 +5,8 @@
       "effect": "allow",
       "action": [
         "cdn:DescribeDomainsConfig",
+        "dnspod:DescribeDomainList",
+        "dnspod:DescribeRecordList",
         "ssl:CreateCertificateBindResourceSyncTask",
         "ssl:DescribeCertificateBindResourceTaskResult",
         "ssl:DescribeCertificates",

@@ -55,6 +55,7 @@ Orbit deliberately stops at the dotted line: it does not issue certificates and 
 | **Append-only audit log** | One JSONL record per change plus a per-run summary. Never contains credentials. |
 | **Honest semantics** | Dry-run by default, `--yes` required to write, exit codes that distinguish *pending changes* from *partial failure* from *safety refusal*. |
 | **A real TUI** | Status overview, per-account console, permission guide, live apply progress with per-domain state. |
+| **DNS management** | Hosted zones and records: list, create/update (idempotent `set`), delete, enable/disable, plus a propagation check. CLI and TUI. |
 | **Static binary** | `CGO_ENABLED=0`, one file, no runtime dependencies. English and 简体中文 at parity. |
 
 ## Quick start
@@ -173,6 +174,12 @@ Orbit decides how to behave from the flags *and* the terminal:
 | `orbit account add \| list \| remove \| test` | Manage credentials and verify access |
 | `orbit account guide` | Choose platform/products/scope → minimal permission list + paste-ready policy |
 | `orbit doctor` | Environment self-check |
+| `orbit dns zones` | List hosted DNS zones |
+| `orbit dns ls <zone>` | List records (`--type`, `--name`, `--keyword`) |
+| `orbit dns set <zone> <name> <type> <value>` | Create or update one record (idempotent; `--yes` writes) |
+| `orbit dns rm \| enable \| disable <zone> <id...>` | Delete, enable or disable records |
+| `orbit dns check <zone> <name> <type>` | Compare the configured record with public DNS |
+| `orbit dns` | Interactive DNS console (zones, records, create/edit/delete) |
 | `orbit config show \| set` | Inspect and change configuration |
 | `orbit about` | Identity card: logo, build, paths, audit status |
 | `orbit version` | Version, commit and build date |
@@ -263,6 +270,51 @@ A certificate is only deleted when **all four gates** pass, the cloud's binding 
 complete evidence, and the backup was written. Everything else is reported as a skipped
 candidate with its reason — never silently ignored.
 
+### DNS management — `orbit dns`
+
+Records for every hosted zone, without leaving the terminal:
+
+```bash
+orbit dns zones                                   # hosted zones, record counts, plan
+orbit dns ls example.com                          # all records
+orbit dns ls example.com --type CNAME --keyword cdn
+orbit dns set example.com app A 203.0.113.50      # plan only
+orbit dns set example.com app A 203.0.113.50 --yes
+orbit dns set example.com _acme-challenge TXT "$TOKEN" --ttl 60
+orbit dns disable example.com 12 --yes
+orbit dns rm example.com 12 --yes
+orbit dns check example.com www CNAME             # is it live in public DNS?
+```
+
+`dns set` is **idempotent**: it matches by (name, type), so the same command in cron
+skips an identical record, updates a changed one, and creates a missing one. Writes are
+dry-run unless `--yes` is given, every change is read back, and every change lands in the
+audit log. Multi-record (round-robin) names are refused rather than guessed — target one
+with `--record-id`.
+
+`dns` with no subcommand opens the console:
+
+```text
+╭─ Orbit · DNS console ────────────────────────────────────────────────────────────────────────────────╮
+│account demo · DNS                                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ hosted zones ───────────────────────────────────────────────────────────────────────────────────────╮
+│▸ example.com                  7        免费版                                                        │
+│  example.org                  2        专业版                                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ records · example.com (7) ──────────────────────────────────────────────────────────────────────────╮
+│    ID      NAME                   TYPE   VALUE                              TTL    STATE             │
+│▸  1       @                      A      203.0.113.10                       600    enabled            │
+│   5       @                      MX     mail.example.net                   600    enabled            │
+│   6       @                      TXT    v=spf1 include:example.net -all    600    enabled            │
+│   3       api                    A      203.0.113.11                       120    enabled            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────╯
+↑/↓ move  ·  ←/→ zone  ·  n new  ·  e edit  ·  d delete  ·  space enable/disable  ·  / filter
+```
+
+Validated locally before any API call: A/AAAA addresses, CNAME/NS targets, MX priority
+1–20, TXT length, SRV arity and CAA tags, hostname label rules, TTL bounds.
+
 ### TUI keys
 
 | Key | Action |
@@ -276,6 +328,8 @@ candidate with its reason — never silently ignored.
 | `tab` / `1`–`9` | Switch account |
 | `r` | Rescan the current account |
 | `p` / `w` | (guide) Show the policy JSON / save it to a file |
+| `n` / `e` / `d` | (dns) New record / edit the selected one / delete it |
+| `←` / `→` | (dns) Switch zone; `/` filters the record list |
 | `q` / `esc` | Quit / cancel without writing |
 
 ### Exit codes
@@ -338,9 +392,9 @@ the provider's SDK interfaces:
 
 | File | Actions | Use it for |
 | --- | --- | --- |
-| [`docs/cam/readonly.json`](docs/cam/readonly.json) | 8 | `status`, `doctor`, `account test`, every `--dry-run` |
-| [`docs/cam/execute.json`](docs/cam/execute.json) | 10 | `orbit update --ssl --yes` |
-| [`docs/cam/delete.json`](docs/cam/delete.json) | 13 | `orbit clean --ssl --yes` |
+| [`docs/cam/readonly.json`](docs/cam/readonly.json) | 10 | `status`, `doctor`, `account test`, every `--dry-run` |
+| [`docs/cam/execute.json`](docs/cam/execute.json) | 15 | `orbit update --ssl --yes` |
+| [`docs/cam/delete.json`](docs/cam/delete.json) | 19 | `orbit clean --ssl --yes` |
 
 Recommended: a **read-only** API account on the machine that inspects, and a separate
 **execute** account on the machine that writes. One console-side grant is also required: the
@@ -408,7 +462,7 @@ internal/
   cli/                     commands, flags, mode selection, output, about card
   core/                    pure domain logic: model, matching, plan, safety gates
   cloud/                   Provider interface + offline demo provider
-    tencent/               Tencent Cloud: SSL, CDN, EdgeOne, STS; permissions & policies
+    tencent/               Tencent Cloud: SSL, CDN, EdgeOne, DNSPod, STS; permissions & policies
   render/
     plain/                 text output for scripts
     tui/                   Bubble Tea screens: console, status, run, guide, picker

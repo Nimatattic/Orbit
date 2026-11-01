@@ -31,6 +31,7 @@ const (
 	SourceSSL = "https://cloud.tencent.com/document/product/598/98168"
 	SourceCDN = "https://cloud.tencent.com/document/product/598/98110"
 	SourceTEO = "https://cloud.tencent.com/document/product/598/99327"
+	SourceDNS = "https://cloud.tencent.com/document/product/598/99243"
 )
 
 // ProductScope identifies a scope the operator can opt into. The certificate
@@ -42,6 +43,8 @@ const (
 	ScopeCDN = "cdn"
 	// ScopeTEO covers EdgeOne (teo:*).
 	ScopeTEO = "teo"
+	// ScopeDNS covers DNSPod record management (dnspod:*).
+	ScopeDNS = "dnspod"
 )
 
 // Permission is one CAM action Orbit uses, with the reason it needs it.
@@ -138,6 +141,32 @@ var permissions = []Permission{
 	{
 		Action: "ssl:DescribeDeleteCertificatesTaskResult", Tier: TierDelete,
 		Scopes: []string{ScopeSSL}, PurposeKey: "perm.ssl.delete_task", Source: SourceSSL,
+	},
+
+	// --- DNS (DNSPod) -------------------------------------------------------
+	{
+		Action: "dnspod:DescribeDomainList", Tier: TierRead, Scopes: []string{ScopeDNS},
+		PurposeKey: "perm.dns.zones", Source: SourceDNS,
+	},
+	{
+		Action: "dnspod:DescribeRecordList", Tier: TierRead, Scopes: []string{ScopeDNS},
+		PurposeKey: "perm.dns.records", Source: SourceDNS,
+	},
+	{
+		Action: "dnspod:CreateRecord", Tier: TierWrite, Scopes: []string{ScopeDNS},
+		PurposeKey: "perm.dns.create", Source: SourceDNS,
+	},
+	{
+		Action: "dnspod:ModifyRecord", Tier: TierWrite, Scopes: []string{ScopeDNS},
+		PurposeKey: "perm.dns.update", Source: SourceDNS,
+	},
+	{
+		Action: "dnspod:ModifyRecordStatus", Tier: TierWrite, Scopes: []string{ScopeDNS},
+		PurposeKey: "perm.dns.toggle", Source: SourceDNS,
+	},
+	{
+		Action: "dnspod:DeleteRecord", Tier: TierDelete, Scopes: []string{ScopeDNS},
+		PurposeKey: "perm.dns.delete", Source: SourceDNS,
 	},
 
 	// --- optional: experimental unified deploy strategy ---------------------

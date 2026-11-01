@@ -27,6 +27,73 @@ type stubProvider struct {
 	lastScope   cloud.ScanScope
 	material    cloud.Material
 	materialErr error
+
+	// DNS state, used by the DNS command tests.
+	dnsZones   []core.DNSZone
+	dnsRecords map[string][]core.DNSRecord
+	dnsNextID  uint64
+	dnsCreates int
+	dnsUpdates int
+	dnsDeletes int
+	dnsToggles int
+}
+
+// DNSProvider methods -------------------------------------------------------
+
+func (s *stubProvider) ListZones(context.Context, string) ([]core.DNSZone, error) {
+	return s.dnsZones, nil
+}
+
+func (s *stubProvider) ListRecords(_ context.Context, _ string, zone string) ([]core.DNSRecord, error) {
+	return s.dnsRecords[zone], nil
+}
+
+func (s *stubProvider) CreateRecord(_ context.Context, _ string, in core.DNSRecordInput) (core.DNSRecord, error) {
+	in = in.WithDefaults()
+	if err := core.ValidateRecordInput(in); err != nil {
+		return core.DNSRecord{}, err
+	}
+	s.dnsCreates++
+	s.dnsNextID++
+	rec := core.DNSRecord{
+		ID: s.dnsNextID, Zone: in.Zone, Name: core.NormaliseDNSName(in.Name), Type: in.Type,
+		Value: in.Value, TTL: in.TTL, MX: in.MX, Line: in.Line, Enabled: in.Enabled, Remark: in.Remark,
+	}
+	s.dnsRecords[in.Zone] = append(s.dnsRecords[in.Zone], rec)
+	return rec, nil
+}
+
+func (s *stubProvider) UpdateRecord(_ context.Context, _ string, rec core.DNSRecord) (core.DNSRecord, error) {
+	s.dnsUpdates++
+	for i, existing := range s.dnsRecords[rec.Zone] {
+		if existing.ID == rec.ID {
+			s.dnsRecords[rec.Zone][i] = rec
+			return rec, nil
+		}
+	}
+	return core.DNSRecord{}, errors.New("record not found")
+}
+
+func (s *stubProvider) DeleteRecord(_ context.Context, _ string, zone string, id uint64) error {
+	s.dnsDeletes++
+	for i, existing := range s.dnsRecords[zone] {
+		if existing.ID == id {
+			s.dnsRecords[zone] = append(s.dnsRecords[zone][:i], s.dnsRecords[zone][i+1:]...)
+			return nil
+		}
+	}
+	return errors.New("record not found")
+}
+
+func (s *stubProvider) SetRecordEnabled(_ context.Context, _ string, zone string, id uint64, enabled bool) error {
+	s.dnsToggles++
+	for i, existing := range s.dnsRecords[zone] {
+		if existing.ID == id {
+			s.dnsRecords[zone][i].Enabled = enabled
+			return nil
+		}
+	}
+	return errors.New("record not found")
 }
 
 // CertificateMaterial makes stubProvider a cloud.MaterialFetcher.

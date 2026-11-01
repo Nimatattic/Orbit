@@ -270,7 +270,7 @@ func TestPermissionTableEntriesAreComplete(t *testing.T) {
 		}
 		grantable++
 		switch p.Source {
-		case SourceSSL, SourceCDN, SourceTEO:
+		case SourceSSL, SourceCDN, SourceTEO, SourceDNS:
 		default:
 			t.Fatalf("%s has no official source; cite the CAM interface list that documents it", p.Action)
 		}

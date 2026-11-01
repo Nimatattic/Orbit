@@ -305,6 +305,31 @@ Orbit · 应用证书 · main                                       12s
 | 保存路径处理 | 以 `/` 结尾或指向已存在目录 → 自动拼默认文件名；`~/` 会展开；父目录自动创建 |
 | 输入隔离 | 输入框打开时按键全部进入输入（路径含 `q`/`p`/`w` 不会误触发退出或切换），只有 `esc`/`ctrl+c` 例外 |
 
+## DNS 管理（`orbit dns`）
+
+```bash
+./bin/orbit dns zones
+./bin/orbit dns ls example.com --type CNAME
+./bin/orbit dns set example.com app A 203.0.113.50            # 计划
+./bin/orbit dns set example.com app A 203.0.113.50 --yes      # 写入
+./bin/orbit dns set example.com app A 203.0.113.50 --yes      # 再跑一次应为"无需变更"
+./bin/orbit dns disable example.com <id> --yes
+./bin/orbit dns rm example.com <id> --yes
+./bin/orbit dns check example.com www CNAME
+./bin/orbit dns                                               # TUI
+```
+
+| 检查项 | 期望 |
+| --- | --- |
+| 只读命令 | `zones` / `ls` 不需要 `--yes`；`--json` 输出数组 |
+| 默认安全 | `set` / `rm` / `enable` / `disable` 不带 `--yes` 时只打印计划，云端无变化 |
+| 幂等 | 同一 `set` 连跑两次，第二次提示已是最新值，不产生重复记录 |
+| 本地校验 | `A` 传域名、`AAAA` 传 IPv4、CNAME 放在 `@`、TXT 超 255 字节等情况在本地就被拒绝，不会发请求 |
+| 回读 | 写入结果带 `read-back verified`；未回读到时显示 `unverified` |
+| 多值记录 | 同名同类型存在多条时 `set` 拒绝并要求 `--record-id`，不会误改 |
+| 账号歧义 | 多账号下写操作要求 `--accounts`，否则退出码 4 |
+| TUI | `orbit dns` 可切换域名、`n` 新建、`e` 编辑、`d` 删除（需 `y` 确认）、空格启停、`/` 过滤 |
+
 ## 总控台（`orbit dash`）
 
 ```bash

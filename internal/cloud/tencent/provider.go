@@ -40,6 +40,7 @@ type Provider struct {
 	cdn      cdnAPI
 	teo      teoAPI
 	sts      stsAPI
+	dnspod   dnspodAPI
 	limiters map[string]*limiter
 	now      func() time.Time
 	sleep    func(context.Context, time.Duration) error
@@ -48,11 +49,13 @@ type Provider struct {
 // New builds a provider bound to one account.
 func New(account string, opts Options) (*Provider, error) {
 	opts = opts.withDefaults()
-	sslClient, cdnClient, teoClient, stsClient, err := newSDKClients(opts)
+	sslClient, cdnClient, teoClient, stsClient, dnsClient, err := newSDKClients(opts)
 	if err != nil {
 		return nil, err
 	}
-	return newWithClients(account, opts, sslClient, cdnClient, teoClient, stsClient), nil
+	p := newWithClients(account, opts, sslClient, cdnClient, teoClient, stsClient)
+	p.dnspod = dnsClient
+	return p, nil
 }
 
 func newWithClients(account string, opts Options, sslClient sslAPI, cdnClient cdnAPI, teoClient teoAPI, stsClients ...stsAPI) *Provider {
@@ -75,6 +78,7 @@ func newWithClients(account string, opts Options, sslClient sslAPI, cdnClient cd
 			"cdn": newLimiter(cdnQPS, now, sleepCtx),
 			"teo": newLimiter(teoQPS, now, sleepCtx),
 			"sts": newLimiter(sslQPS, now, sleepCtx),
+			"dns": newLimiter(dnsQPS, now, sleepCtx),
 		},
 	}
 }

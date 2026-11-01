@@ -5,6 +5,8 @@
       "effect": "allow",
       "action": [
         "cdn:DescribeDomainsConfig",
+        "dnspod:DescribeDomainList",
+        "dnspod:DescribeRecordList",
         "ssl:CreateCertificateBindResourceSyncTask",
         "ssl:DescribeCertificateBindResourceTaskResult",
         "ssl:DescribeCertificates",
@@ -21,6 +23,9 @@
       "effect": "allow",
       "action": [
         "cdn:ModifyDomainConfig",
+        "dnspod:CreateRecord",
+        "dnspod:ModifyRecord",
+        "dnspod:ModifyRecordStatus",
         "teo:ModifyHostsCertificate"
       ],
       "resource": [

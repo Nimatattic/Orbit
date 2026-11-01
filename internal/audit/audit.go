@@ -44,6 +44,8 @@ type Record struct {
 	ErrorCode  string `json:"error_code,omitempty"`
 	MessageKey string `json:"message_key,omitempty"`
 	Error      string `json:"error,omitempty"`
+	// Detail carries a short change description (DNS record value, for example).
+	Detail string `json:"detail,omitempty"`
 	// Counts are only set on summary records.
 	Total      int `json:"total,omitempty"`
 	Applied    int `json:"applied,omitempty"`

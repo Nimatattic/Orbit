@@ -30,9 +30,10 @@ var guideProducts = []struct {
 	ID, LabelKey, Scope string
 	Required            bool
 }{
-	{"ssl", "guide.product.ssl", tencent.ScopeSSL, true},
+	{"ssl", "guide.product.ssl", tencent.ScopeSSL, false},
 	{"cdn", "guide.product.cdn", tencent.ScopeCDN, false},
 	{"teo", "guide.product.teo", tencent.ScopeTEO, false},
+	{"dns", "guide.product.dns", tencent.ScopeDNS, false},
 }
 
 // newAccountGuideCmd builds `orbit account guide`.
@@ -335,37 +336,29 @@ func (a *App) scopeLabelKey(scopeID string) string {
 	return "guide.scope.full"
 }
 
-// guideProductsFromFlag turns --products into guide product ids, defaulting to
-// every product so the printed list is complete.
+// guideProductsFromFlag turns --products into guide product ids. An empty flag
+// means "everything", so the printed list is complete by default.
 func (a *App) guideProductsFromFlag() []string {
-	if v := strings.TrimSpace(a.Products); v != "" {
-		wanted := map[string]bool{}
-		for _, id := range splitList(v) {
-			wanted[strings.ToLower(id)] = true
-		}
-		out := []string{}
-		for _, p := range guideProducts {
-			if wanted[p.ID] || (p.Required && wanted[p.ID]) {
-				out = append(out, p.ID)
-			}
-		}
-		// The certificate inventory is never optional.
-		hasSSL := false
-		for _, id := range out {
-			if id == "ssl" {
-				hasSSL = true
-			}
-		}
-		if !hasSSL {
-			out = append([]string{"ssl"}, out...)
-		}
-		if len(out) > 0 {
-			return out
-		}
+	all := make([]string, 0, len(guideProducts))
+	for _, p := range guideProducts {
+		all = append(all, p.ID)
+	}
+	v := strings.TrimSpace(a.Products)
+	if v == "" {
+		return all
+	}
+	wanted := map[string]bool{}
+	for _, id := range splitList(v) {
+		wanted[strings.ToLower(id)] = true
 	}
 	out := make([]string, 0, len(guideProducts))
 	for _, p := range guideProducts {
-		out = append(out, p.ID)
+		if wanted[p.ID] {
+			out = append(out, p.ID)
+		}
+	}
+	if len(out) == 0 {
+		return all
 	}
 	return out
 }

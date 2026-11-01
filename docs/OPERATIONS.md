@@ -39,9 +39,9 @@ ssh root@server 'chmod 755 /usr/local/bin/orbit && orbit version'
 
 | 文件 | 动作数 | 用途 |
 | --- | --- | --- |
-| [`cam/readonly.json`](cam/readonly.json) | 9 | `status` / `doctor` / `account test`，以及一切 `--dry-run` |
-| [`cam/execute.json`](cam/execute.json) | 11 | 只读 + `orbit update --ssl --yes`（`cdn:ModifyDomainConfig`、`teo:ModifyHostsCertificate`） |
-| [`cam/delete.json`](cam/delete.json) | 14 | 执行 + `orbit clean --ssl --yes`（`ssl:DeleteCertificates` 等） |
+| [`cam/readonly.json`](cam/readonly.json) | 10 | `status` / `doctor` / `account test`，以及一切 `--dry-run` |
+| [`cam/execute.json`](cam/execute.json) | 15 | 只读 + `orbit update --ssl --yes`（`cdn:ModifyDomainConfig`、`teo:ModifyHostsCertificate`） |
+| [`cam/delete.json`](cam/delete.json) | 19 | 执行 + `orbit clean --ssl --yes`（`ssl:DeleteCertificates` 等） |
 
 **这三份文件由代码生成，不要手改。** 需要调整时改
 [`internal/cloud/tencent/permissions.go`](../internal/cloud/tencent/permissions.go)，然后：
@@ -168,6 +168,24 @@ systemctl list-timers orbit-update.timer
 ORBIT_TENCENT_MAIN_SECRET_ID=AKIDxxxxxxxx
 ORBIT_TENCENT_MAIN_SECRET_KEY=xxxxxxxx
 ```
+
+## 6.5 DNS 记录
+
+`orbit dns set` 是幂等的，适合放进 cron：
+
+```bash
+# 计划（不写云端）
+orbit dns set example.com app A 203.0.113.50
+# 写入；重复执行不会产生重复记录
+orbit dns set example.com app A 203.0.113.50 --yes
+# 证书 DNS-01 校验记录
+orbit dns set example.com _acme-challenge TXT "$TOKEN" --ttl 60 --yes
+# 记录是否已生效（对比公网 DNS）
+orbit dns check example.com _acme-challenge TXT
+```
+
+每次写入都会回读确认并写审计（`action: dns.create|update|delete`）。
+多值（轮询）同名记录不会被猜测覆盖，需用 `--record-id` 指定。
 
 ## 7. 日常查看
 

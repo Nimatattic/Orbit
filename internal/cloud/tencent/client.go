@@ -9,6 +9,7 @@ import (
 	cdn "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdn/v20180606"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/profile"
+	dnspod "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/dnspod/v20210323"
 	ssl "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl/v20191205"
 	sts "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/sts/v20180813"
 	teo "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/teo/v20220901"
@@ -28,10 +29,15 @@ const (
 	sslQPS = 10 // per API + endpoint region + sub-account
 	cdnQPS = 20
 	teoQPS = 20
+	dnsQPS = 20
 
 	sslPageSize = 100 // DescribeCertificates allows up to 1000
 	cdnPageSize = 100 // DescribeDomainsConfig hard limit
 	teoPageSize = 100 // DescribeZones limit; acceleration domains allow 200
+
+	dnsZonePageSize   = 100  // DescribeDomainList limit
+	dnsRecordPageSize = 500  // DescribeRecordList allows more, 500 keeps responses small
+	dnsDefaultLine    = "默认" // DNSPod's default resolution line
 )
 
 // Options configures one account's provider.
@@ -103,6 +109,16 @@ type teoAPI interface {
 	ModifyHostsCertificate(*teo.ModifyHostsCertificateRequest) (*teo.ModifyHostsCertificateResponse, error)
 }
 
+// dnspodAPI is the subset of the DNSPod client Orbit calls for DNS management.
+type dnspodAPI interface {
+	DescribeDomainList(*dnspod.DescribeDomainListRequest) (*dnspod.DescribeDomainListResponse, error)
+	DescribeRecordList(*dnspod.DescribeRecordListRequest) (*dnspod.DescribeRecordListResponse, error)
+	CreateRecord(*dnspod.CreateRecordRequest) (*dnspod.CreateRecordResponse, error)
+	ModifyRecord(*dnspod.ModifyRecordRequest) (*dnspod.ModifyRecordResponse, error)
+	DeleteRecord(*dnspod.DeleteRecordRequest) (*dnspod.DeleteRecordResponse, error)
+	ModifyRecordStatus(*dnspod.ModifyRecordStatusRequest) (*dnspod.ModifyRecordStatusResponse, error)
+}
+
 // stsAPI is the subset of the STS client Orbit calls, used to report which
 // account a credential actually belongs to.
 type stsAPI interface {
@@ -110,7 +126,7 @@ type stsAPI interface {
 }
 
 // newSDKClients builds the product clients sharing one credential.
-func newSDKClients(opts Options) (sslAPI, cdnAPI, teoAPI, stsAPI, error) {
+func newSDKClients(opts Options) (sslAPI, cdnAPI, teoAPI, stsAPI, dnspodAPI, error) {
 	credential := common.NewCredential(opts.SecretID, opts.SecretKey)
 
 	profileFor := func() *profile.ClientProfile {
@@ -128,21 +144,25 @@ func newSDKClients(opts Options) (sslAPI, cdnAPI, teoAPI, stsAPI, error) {
 
 	sslClient, err := ssl.NewClient(credential, opts.Region, profileFor())
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	cdnClient, err := cdn.NewClient(credential, opts.Region, profileFor())
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	teoClient, err := teo.NewClient(credential, opts.Region, profileFor())
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	stsClient, err := sts.NewClient(credential, opts.Region, profileFor())
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
-	return sslClient, cdnClient, teoClient, stsClient, nil
+	dnsClient, err := dnspod.NewClient(credential, opts.Region, profileFor())
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+	return sslClient, cdnClient, teoClient, stsClient, dnsClient, nil
 }
 
 // shanghai is the timezone Tencent Cloud uses for the naive timestamps it

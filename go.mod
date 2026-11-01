@@ -10,6 +10,7 @@ require (
 	github.com/spf13/pflag v1.0.9
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdn v1.3.173
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.191
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/dnspod v1.3.131
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl v1.3.147
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/sts v1.1.11
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/teo v1.3.186

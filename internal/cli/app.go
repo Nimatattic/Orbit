@@ -96,6 +96,12 @@ type App struct {
 	WorkDir     string
 	Home        string
 	Interactive bool
+
+	// DNS flags and filters, bound by `orbit dns` subcommands.
+	DNSFlags         dnsWriteFlags
+	DNSFilterType    string
+	DNSFilterName    string
+	DNSFilterKeyword string
 }
 
 // Execute runs the CLI and returns the process exit code.
@@ -595,6 +601,7 @@ func (a *App) newRootCmd() *cobra.Command {
 		a.newAccountCmd(),
 		a.newConfigCmd(),
 		a.newDoctorCmd(),
+		a.newDNSCmd(),
 		a.newVersionCmd(),
 		a.newAboutCmd(),
 	)

@@ -19,10 +19,22 @@ type Provider struct {
 	certs     []core.Certificate
 	resources []core.Resource
 	evidence  map[string]core.BindingEvidence
+	// DNS demo state, seeded by seedDNS.
+	zones        []core.DNSZone
+	records      map[string][]core.DNSRecord
+	nextRecordID uint64
 }
 
 // NewDemo builds the demo dataset described in testdata/demo.md.
+// NewDemo builds the demo dataset, including the DNS zones.
 func NewDemo() *Provider {
+	p := newDemoProvider()
+	p.seedDNS()
+	return p
+}
+
+// newDemoProvider builds the certificate/resource dataset; NewDemo adds DNS.
+func newDemoProvider() *Provider {
 	now := time.Now()
 	i64 := func(v int64) *int64 { return &v }
 	mk := func(id, alias, cn string, sans []string, from, pkg string, beginAgo, endIn time.Duration, status uint64, hosting int64) core.Certificate {

@@ -9,32 +9,43 @@ import (
 
 // commandKeys maps command names to message keys.
 var commandKeys = map[string]string{
-	"orbit":   "root.short",
-	"status":  "status.short",
-	"update":  "update.short",
-	"clean":   "clean.short",
-	"account": "account.short",
-	"config":  "config.short",
-	"doctor":  "doctor.short",
-	"version": "version.short",
-	"dash":    "cmd.dash.short",
-	"about":   "cmd.about.short",
-	"list":    "account.list.short",
-	"add":     "account.add.short",
-	"remove":  "account.remove.short",
-	"test":    "account.test.short",
-	"guide":   "cmd.account.guide.short",
-	"show":    "config.show.short",
-	"path":    "config.path.short",
-	"set":     "config.set.short",
+	"orbit":       "root.short",
+	"status":      "status.short",
+	"update":      "update.short",
+	"clean":       "clean.short",
+	"account":     "account.short",
+	"config":      "config.short",
+	"doctor":      "doctor.short",
+	"version":     "version.short",
+	"dash":        "cmd.dash.short",
+	"about":       "cmd.about.short",
+	"dns":         "cmd.dns.short",
+	"dns zones":   "cmd.dns.zones.short",
+	"dns ls":      "cmd.dns.ls.short",
+	"dns set":     "cmd.dns.set.short",
+	"dns rm":      "cmd.dns.rm.short",
+	"dns enable":  "cmd.dns.enable.short",
+	"dns disable": "cmd.dns.disable.short",
+	"dns check":   "cmd.dns.check.short",
+	"list":        "account.list.short",
+	"add":         "account.add.short",
+	"remove":      "account.remove.short",
+	"test":        "account.test.short",
+	"guide":       "cmd.account.guide.short",
+	"show":        "config.show.short",
+	"path":        "config.path.short",
+	"set":         "config.set.short",
 }
 
 // commandLongKeys maps command names to a long description key for the commands
 // that carry one.
 var commandLongKeys = map[string]string{
-	"dash":  "cmd.dash.long",
-	"guide": "cmd.account.guide.long",
-	"about": "cmd.about.long",
+	"dash":      "cmd.dash.long",
+	"guide":     "cmd.account.guide.long",
+	"about":     "cmd.about.long",
+	"dns":       "cmd.dns.long",
+	"dns set":   "cmd.dns.set.long",
+	"dns check": "cmd.dns.check.long",
 }
 
 // flagKeys maps flag names to message keys.
@@ -69,10 +80,21 @@ func localize(cmd *cobra.Command, b *i18n.Bundle) {
 	if cmd == nil || b == nil {
 		return
 	}
-	if key, ok := commandKeys[cmd.Name()]; ok {
+	// Subcommands can share a name (`config set` vs `dns set`), so a qualified
+	// "parent name" key wins over the bare name.
+	lookup := func(m map[string]string) (string, bool) {
+		if cmd.HasParent() && cmd.Parent().Name() != "orbit" {
+			if key, ok := m[cmd.Parent().Name()+" "+cmd.Name()]; ok {
+				return key, true
+			}
+		}
+		key, ok := m[cmd.Name()]
+		return key, ok
+	}
+	if key, ok := lookup(commandKeys); ok {
 		cmd.Short = b.T(key)
 	}
-	if key, ok := commandLongKeys[cmd.Name()]; ok {
+	if key, ok := lookup(commandLongKeys); ok {
 		cmd.Long = b.T(key)
 	}
 	applyFlagUsage(cmd.Flags(), b)
