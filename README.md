@@ -8,7 +8,7 @@
 [![Platform](https://img.shields.io/badge/platform-Tencent%20Cloud-006EFF)](docs/TENCENT_API_NOTES.md)
 [![TUI](https://img.shields.io/badge/TUI-Bubble%20Tea-FF75B7)](https://github.com/charmbracelet/bubbletea)
 [![i18n](https://img.shields.io/badge/i18n-English%20%7C%20%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-4B8BBE)](locales)
-[![Status](https://img.shields.io/badge/status-alpha-orange)](docs/IMPLEMENTATION_PLAN.md)
+[![Release](https://img.shields.io/badge/release-v0.1.0-blue)](https://github.com/Nimatattic/Orbit/releases/tag/v0.1.0)
 [![CI](https://github.com/Nimatattic/Orbit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Nimatattic/Orbit/actions/workflows/ci.yml)
 
 [![Stars](https://img.shields.io/github/stars/Nimatattic/Orbit?style=flat&color=yellow)](https://github.com/Nimatattic/Orbit/stargazers)

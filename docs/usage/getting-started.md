@@ -66,12 +66,13 @@ is stamped `v0.1.0-dev`, so the packages are named
 `orbit_v0.1.0-dev_linux_amd64.tar.gz` and so on.
 
 `go install` works because the module path matches the repository
-(`github.com/Nimatattic/Orbit`, upper case included — Go paths are case-sensitive):
+(`github.com/Nimatattic/Orbit`, upper case included — Go paths are case-sensitive).
+Release [`v0.1.0`](https://github.com/Nimatattic/Orbit/releases/tag/v0.1.0) is tagged, so
+`@latest` resolves to it:
 
 ```bash
-# once a v* tag exists on the repository (see the release workflow in OPERATIONS.md)
 go install github.com/Nimatattic/Orbit/cmd/orbit@latest
-# before the first tag: branch install, or use the clone-and-build path above
+# development tip: unreleased commits on main
 go install github.com/Nimatattic/Orbit/cmd/orbit@main
 ```
 
